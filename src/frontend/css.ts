@@ -138,7 +138,7 @@ export const HEAD = `<!DOCTYPE html>
   .mode-indicator {
     position: absolute;
     top: 3px;
-    inset-inline-start: 3px;
+    left: 3px;
     width: calc(50% - 5px);
     height: calc(100% - 6px);
     background: var(--accent);
@@ -148,6 +148,12 @@ export const HEAD = `<!DOCTYPE html>
   }
   .mode-toggle.advanced .mode-indicator {
     transform: translateX(calc(100% + 4px));
+  }
+  [dir="rtl"] .mode-indicator {
+    transform: translateX(calc(100% + 4px));
+  }
+  [dir="rtl"] .mode-toggle.advanced .mode-indicator {
+    transform: none;
   }
   .mode-btn {
     flex: 1; padding: 8px 12px; border: none; border-radius: 3px;
@@ -334,7 +340,6 @@ export const HEAD = `<!DOCTYPE html>
   [dir="rtl"] .custom-select-arrow { right: auto; left: 12px; }
   [dir="rtl"] input, [dir="rtl"] textarea { direction: rtl; text-align: right; }
   [dir="rtl"] #url, [dir="rtl"] #config-custom, [dir="rtl"] #result-url { direction: ltr; text-align: left; }
-  [dir="rtl"] .mode-toggle.advanced .mode-indicator { transform: translateX(calc(-100% - 4px)); }
 </style>
 </head>
 `;

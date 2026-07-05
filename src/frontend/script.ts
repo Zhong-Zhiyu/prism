@@ -451,15 +451,32 @@ function t(key) {
   return (I18N[currentLang] && I18N[currentLang][key]) || (I18N['zh-Hans'][key]) || key;
 }
 
-function applyLanguage(lang) {
+var _measureEl;
+function measureTextWidth(text, font) {
+  if (!_measureEl) {
+    _measureEl = document.createElement('span');
+    _measureEl.style.position = 'absolute';
+    _measureEl.style.visibility = 'hidden';
+    _measureEl.style.whiteSpace = 'nowrap';
+    document.body.appendChild(_measureEl);
+  }
+  _measureEl.style.font = font;
+  _measureEl.textContent = text;
+  return _measureEl.getBoundingClientRect().width;
+}
+
+var FLIP_SEL = '.brand, .brand h1, .brand p, .header-actions, .header-btn, label, .card-title, .form-group, .form-row, input, textarea, .btn-add-url, .btn-primary, .btn-sm, .mode-btn, .toggle-item, .url-row, .url-row-del, .custom-select-trigger, .custom-select-trigger-text, .custom-select-arrow, .custom-select, .result-actions, .status, #advanced, #config-custom-group';
+
+var TEXT_SEL = 'label:not(.toggle-item), .card-title, .custom-select-trigger, .brand h1, .brand p, .status, input[type="text"], input:not([type]), textarea';
+
+function doApplyLanguage(lang, newDir) {
   currentLang = lang;
   try { localStorage.setItem(LANG_KEY, lang); } catch(e) {}
 
   document.documentElement.lang = lang;
-  document.documentElement.dir = (lang === 'ar' || lang === 'fa') ? 'rtl' : 'ltr';
+  document.documentElement.dir = newDir;
   document.title = I18N[lang].title;
 
-  // data-i18n: replace last text node
   [].forEach.call(document.querySelectorAll('[data-i18n]'), function(el) {
     var k = el.getAttribute('data-i18n');
     if (!I18N[lang] || !I18N[lang][k]) return;
@@ -469,13 +486,11 @@ function applyLanguage(lang) {
     }
   });
 
-  // data-i18n-placeholder
   [].forEach.call(document.querySelectorAll('[data-i18n-placeholder]'), function(el) {
     var k = el.getAttribute('data-i18n-placeholder');
     if (I18N[lang] && I18N[lang][k]) el.placeholder = I18N[lang][k];
   });
 
-  // Update native selects
   var optSets = {config: ['optDefault','optPreset','optCustom'], target: ['optClash','optSingbox','optSurge']};
   for (var sid in optSets) {
     var s = document.getElementById(sid === 'config' ? 'config-select' : 'target');
@@ -485,7 +500,6 @@ function applyLanguage(lang) {
     }
   }
 
-  // Sync custom dropdown triggers
   [].forEach.call(document.querySelectorAll('.custom-select'), function(w) {
     var sel = w.querySelector('select');
     if (!sel) return;
@@ -499,10 +513,105 @@ function applyLanguage(lang) {
     }
   });
 
-  // Refresh status message
   var st = document.getElementById('status');
   var sk = st && st.getAttribute('data-i18n-status');
   if (sk) st.textContent = t(sk);
+}
+
+function applyLanguage(lang) {
+  var prevDir = document.documentElement.dir;
+  var newDir = (lang === 'ar' || lang === 'fa') ? 'rtl' : 'ltr';
+  var dirChanged = prevDir && prevDir !== newDir;
+
+  if (!dirChanged) {
+    doApplyLanguage(lang, newDir);
+    return;
+  }
+
+  var DURATION = 350;
+  var EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+
+  var flipEls = document.querySelectorAll(FLIP_SEL);
+  var flips = [];
+  for (var i = 0; i < flipEls.length; i++) {
+    flips.push({ el: flipEls[i], rect: flipEls[i].getBoundingClientRect() });
+  }
+
+  var tEls = document.querySelectorAll(TEXT_SEL);
+  var textAnims = [];
+  for (var i = 0; i < tEls.length; i++) {
+    var el = tEls[i];
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      if (el.matches('#url, #config-custom, #result-url')) continue;
+      if (!el.value || !el.value.trim()) continue;
+    } else {
+      var txt = (el.textContent || '').trim();
+      if (!txt) continue;
+    }
+    var st = getComputedStyle(el);
+    var val = (el.value || el.textContent || '').trim();
+    var tw = measureTextWidth(val, st.font);
+    if (tw <= 0) continue;
+    textAnims.push({
+      el: el,
+      oldTW: tw,
+      oldPL: parseFloat(st.paddingLeft) || 0,
+      oldPR: parseFloat(st.paddingRight) || 0,
+      oldCW: el.clientWidth
+    });
+  }
+
+  doApplyLanguage(lang, newDir);
+
+  for (var i = 0; i < textAnims.length; i++) {
+    var ta = textAnims[i];
+    var val = (ta.el.value || ta.el.textContent || '').trim();
+    if (!val) continue;
+    var st = getComputedStyle(ta.el);
+    var newTW = measureTextWidth(val, st.font);
+    var pl = parseFloat(st.paddingLeft) || 0;
+    var pr = parseFloat(st.paddingRight) || 0;
+    var cw = ta.el.clientWidth;
+
+    var beforeX = (prevDir === 'rtl') ? (ta.oldCW - ta.oldPR - ta.oldTW) : ta.oldPL;
+    var afterX = (newDir === 'rtl') ? (cw - pr - newTW) : pl;
+    var delta = afterX - beforeX;
+    if (Math.abs(delta) < 1) continue;
+
+    ta.indent = (newDir === 'rtl') ? delta : -delta;
+    ta.el.style.whiteSpace = 'nowrap';
+    ta.el.style.textIndent = ta.indent + 'px';
+  }
+
+  for (var i = 0; i < flips.length; i++) {
+    var item = flips[i];
+    var first = item.rect;
+    var last = item.el.getBoundingClientRect();
+    var dx = first.left - last.left;
+    var dy = first.top - last.top;
+    if (dx !== 0 || dy !== 0) {
+      (function(el, x, y) {
+        el.style.translate = x + 'px ' + y + 'px';
+        var a = el.animate([
+          { translate: x + 'px ' + y + 'px' },
+          { translate: '0px 0px' }
+        ], { duration: DURATION, easing: EASING, fill: 'forwards' });
+        a.onfinish = function() { el.style.translate = ''; a.cancel(); };
+      })(item.el, dx, dy);
+    }
+  }
+
+  for (var i = 0; i < textAnims.length; i++) {
+    var ta = textAnims[i];
+    if (ta.indent === undefined) continue;
+    (function(el, indent) {
+      var a = el.animate([
+        { textIndent: indent + 'px' },
+        { textIndent: '0px' }
+      ], { duration: DURATION, easing: EASING, fill: 'forwards' });
+      a.onfinish = function() { el.style.textIndent = ''; el.style.whiteSpace = ''; a.cancel(); };
+    })(ta.el, ta.indent);
+  }
 }
 
 currentLang = detectLanguage();
