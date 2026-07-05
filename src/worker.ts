@@ -161,15 +161,18 @@ app.get('/sub', async (c: Context) => {
       ? upstreamUserInfo
       : 'upload=0; download=0; total=0; expire=0';
 
+    // 用 Base64 编码 UTF-8 文件名，避免 HTTP 头中的非 ASCII 字符触发 ByteString 异常（Vercel）
+    const safeName = utf8ToBase64(cleanBase);
+
     return new Response(output, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename=${cleanBase}`,
+        'Content-Disposition': `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(cleanBase)}`,
         'Access-Control-Allow-Origin': '*',
         'subscription-userinfo': userInfoHeader,
         'profile-update-interval': '24',
-        'profile-title': cleanBase,
+        'profile-title': safeName,
       },
     });
   } catch (err) {
@@ -247,6 +250,15 @@ function createDefaultIniConfig(): ParsedIniConfig {
     enableRuleGenerator: false,
     overwriteOriginalRules: false,
   };
+}
+
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 export default app;

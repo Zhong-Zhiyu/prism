@@ -1,0 +1,3 @@
+#!/bin/sh
+npm run build:vercel
+git add api/index.js

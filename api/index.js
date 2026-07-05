@@ -4937,6 +4937,14 @@ function createDefaultIniConfig() {
     overwriteOriginalRules: false
   };
 }
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 var app, worker_default;
 var init_worker = __esm({
   "src/worker.ts"() {
@@ -5058,15 +5066,16 @@ var init_worker = __esm({
             return c.text("\u9519\u8BEF\uFF1A\u4E0D\u652F\u6301\u7684 target \u7C7B\u578B", 400);
         }
         const userInfoHeader = upstreamUserInfo && upstreamUserInfo.trim() !== "" ? upstreamUserInfo : "upload=0; download=0; total=0; expire=0";
+        const safeName = utf8ToBase64(cleanBase);
         return new Response(output, {
           status: 200,
           headers: {
             "Content-Type": contentType,
-            "Content-Disposition": `attachment; filename=${cleanBase}`,
+            "Content-Disposition": `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(cleanBase)}`,
             "Access-Control-Allow-Origin": "*",
             "subscription-userinfo": userInfoHeader,
             "profile-update-interval": "24",
-            "profile-title": cleanBase
+            "profile-title": safeName
           }
         });
       } catch (err) {
