@@ -1,12 +1,15 @@
 {
   "name": "prism",
   "version": "1.0.0",
-  "description": "跨格式代理订阅转换工具，可部署至 Cloudflare Workers",
+  "type": "module",
+  "description": "跨格式代理订阅转换工具，可部署至 Cloudflare Workers、Vercel 等平台",
   "main": "src/worker.ts",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "build": "esbuild src/worker.ts --bundle --outfile=dist/worker.js --format=esm --target=es2022"
+    "deploy": "npm run build && wrangler deploy",
+    "build": "esbuild src/worker.ts --bundle --outfile=dist/worker.js --format=esm --target=es2022",
+    "build:vercel": "esbuild src/vercel.ts --bundle --outfile=api/index.js --format=esm --platform=node --target=node18 --external:'hono/*' --external:js-yaml",
+    "dev:vercel": "node scripts/dev-vercel.js"
   },
   "dependencies": {
     "hono": "^4.0.0",
@@ -15,7 +18,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",
     "esbuild": "^0.21.0",
-    "wrangler": "^3.61.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "wrangler": "^3.61.0"
   }
 }

@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](docs/README.zh-Hans.md) | [繁體中文](docs/README.zh-Hant.md) | [日本語](docs/README.ja.md) | [한국어](docs/README.ko.md) | [Русский](docs/README.ru.md) | [Tiếng Việt](docs/README.vi.md) | [العربية](docs/README.ar.md) | [فارسی](docs/README.fa.md)
 
-Cross-format proxy subscription converter, deployable to Cloudflare Workers.
+Cross-format proxy subscription converter, deployable to Cloudflare Workers and Vercel.
 
 ## Supported Formats
 
@@ -29,29 +29,48 @@ Cross-format proxy subscription converter, deployable to Cloudflare Workers.
 git clone https://github.com/Motrans/prism.git
 cd prism
 npm install
-npm run build
-npx wrangler deploy
+npm run deploy
+```
+
+### Option 3: Vercel
+
+```bash
+git clone https://github.com/Motrans/prism.git
+cd prism
+npm install
+npx vercel deploy --prod
+```
+
+No build step needed — the pre-built `api/index.js` is already included in the repository.
+
+## Local Development
+
+```bash
+npm run dev          # Cloudflare Workers → http://localhost:8787
+npm run dev:vercel   # Vercel (Node.js)  → http://localhost:8788
+npm run build        # Bundle for Cloudflare Workers
+npm run build:vercel # Rebuild api/index.js for Vercel
 ```
 
 ## Project Structure
 
 ```
-src/
-├── worker.ts          # Worker routes + conversion API
-├── frontend/
-│   ├── index.ts       # Entry point, assembles frontend HTML
-│   ├── css.ts         # Stylesheet (grayscale palette, RTL, responsive)
-│   ├── body.ts        # HTML body (form, dropdowns, controls)
-│   └── script.ts      # Client-side JS (theme, i18n, dropdown)
-├── parsers/
-│   ├── ini-parser.ts  # .ini rule config parser
-│   └── yaml-parser.ts # Clash YAML subscription parser
-├── generators/
-│   ├── clash.ts       # Clash YAML output
-│   ├── singbox.ts     # sing-box JSON output
-│   └── surge.ts       # Surge INI output
-└── utils/
-    └── types.ts       # Type definitions + default parameters
+prism/
+├── src/
+│   ├── worker.ts          # Worker routes + conversion API
+│   ├── vercel.ts          # Vercel adapter source
+│   ├── frontend/          # HTML / CSS / client JS
+│   ├── parsers/           # Subscription + config parsers
+│   ├── generators/        # Output format generators
+│   └── utils/             # Types + defaults
+├── api/
+│   └── index.js           # Pre-built Vercel function
+├── scripts/
+│   └── dev-vercel.js      # Local Vercel dev server
+├── public/                # Vercel static placeholder
+├── vercel.json            # Vercel routing config
+├── wrangler.toml          # Cloudflare Workers config
+└── package.json
 ```
 
 ## License

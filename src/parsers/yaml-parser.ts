@@ -290,7 +290,7 @@ function extractTopLevelFields(lines: string[], config: ClashConfig): void {
       if (key === 'hosts') {
         config.hosts = parseNestedDict(blockLines) as Record<string, string>;
       } else if (key === 'dns') {
-        config.dns = parseNestedDict(blockLines);
+        config.dns = parseNestedDict(blockLines) as Record<string, unknown>;
       } else {
         // 未知顶级嵌套块（如 cfw-bypass）→ 通过 index signature 保留
         config[key] = parseNestedDict(blockLines);

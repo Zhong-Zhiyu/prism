@@ -2,7 +2,7 @@
 
 [English](../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Tiếng Việt](README.vi.md) | [العربية](README.ar.md) | [فارسی](README.fa.md)
 
-Конвертер прокси-подписок с поддержкой разных форматов, разворачиваемый на Cloudflare Workers.
+Конвертер прокси-подписок с поддержкой разных форматов, разворачиваемый на Cloudflare Workers и Vercel.
 
 ## Поддерживаемые форматы
 
@@ -29,29 +29,48 @@
 git clone https://github.com/Motrans/prism.git
 cd prism
 npm install
-npm run build
-npx wrangler deploy
+npm run deploy
+```
+
+### Способ 3: Vercel
+
+```bash
+git clone https://github.com/Motrans/prism.git
+cd prism
+npm install
+npx vercel deploy --prod
+```
+
+Сборка не требуется — предварительно собранный `api/index.js` уже включён в репозиторий.
+
+## Локальная разработка
+
+```bash
+npm run dev          # Cloudflare Workers → http://localhost:8787
+npm run dev:vercel   # Vercel (Node.js)  → http://localhost:8788
+npm run build        # Сборка для Cloudflare Workers
+npm run build:vercel # Пересборка api/index.js для Vercel
 ```
 
 ## Структура проекта
 
 ```
-src/
-├── worker.ts          # Маршруты Worker + API конвертации
-├── frontend/
-│   ├── index.ts       # Точка входа, сборка фронтенд HTML
-│   ├── css.ts         # Таблица стилей (серая палитра, RTL, адаптивная вёрстка)
-│   ├── body.ts        # HTML (форма, выпадающие списки, элементы управления)
-│   └── script.ts      # Клиентский скрипт (тема, i18n, выпадающие списки)
-├── parsers/
-│   ├── ini-parser.ts  # Парсер .ini конфигурации правил
-│   └── yaml-parser.ts # Парсер Clash YAML подписок
-├── generators/
-│   ├── clash.ts       # Вывод в Clash YAML
-│   ├── singbox.ts     # Вывод в sing-box JSON
-│   └── surge.ts       # Вывод в Surge INI
-└── utils/
-    └── types.ts       # Определения типов + параметры по умолчанию
+prism/
+├── src/
+│   ├── worker.ts          # Маршруты Worker + API конвертации
+│   ├── vercel.ts          # Исходник адаптера Vercel
+│   ├── frontend/          # HTML / CSS / клиентские скрипты
+│   ├── parsers/           # Парсеры подписок и конфигураций
+│   ├── generators/        # Генераторы выходных форматов
+│   └── utils/             # Типы + параметры по умолчанию
+├── api/
+│   └── index.js           # Предварительно собранная функция Vercel
+├── scripts/
+│   └── dev-vercel.js      # Локальный сервер разработки Vercel
+├── public/                # Статический заполнитель Vercel
+├── vercel.json            # Конфигурация маршрутизации Vercel
+├── wrangler.toml          # Конфигурация Cloudflare Workers
+└── package.json
 ```
 
 ## Лицензия

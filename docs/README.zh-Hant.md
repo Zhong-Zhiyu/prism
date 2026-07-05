@@ -2,7 +2,7 @@
 
 [English](../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Tiếng Việt](README.vi.md) | [العربية](README.ar.md) | [فارسی](README.fa.md)
 
-跨格式代理訂閱轉換工具，可部署至 Cloudflare Workers。
+跨格式代理訂閱轉換工具，可部署至 Cloudflare Workers 和 Vercel。
 
 ## 支援格式
 
@@ -29,29 +29,48 @@
 git clone https://github.com/Motrans/prism.git
 cd prism
 npm install
-npm run build
-npx wrangler deploy
+npm run deploy
+```
+
+### 方式三：Vercel 部署
+
+```bash
+git clone https://github.com/Motrans/prism.git
+cd prism
+npm install
+npx vercel deploy --prod
+```
+
+無需構建步驟——預構建的 `api/index.js` 已包含在倉庫中。
+
+## 本地開發
+
+```bash
+npm run dev          # Cloudflare Workers → http://localhost:8787
+npm run dev:vercel   # Vercel (Node.js)  → http://localhost:8788
+npm run build        # 為 Cloudflare Workers 打包
+npm run build:vercel # 重建 Vercel 用的 api/index.js
 ```
 
 ## 專案結構
 
 ```
-src/
-├── worker.ts          # Worker 路由 + 轉換 API
-├── frontend/
-│   ├── index.ts       # 入口，組裝前端 HTML
-│   ├── css.ts         # 樣式表（灰階調色盤、RTL、響應式）
-│   ├── body.ts        # HTML 主體（表單、下拉選單、控制項）
-│   └── script.ts      # 用戶端腳本（主題、i18n、下拉選單）
-├── parsers/
-│   ├── ini-parser.ts  # .ini 規則設定解析
-│   └── yaml-parser.ts # Clash YAML 訂閱解析
-├── generators/
-│   ├── clash.ts       # Clash YAML 輸出
-│   ├── singbox.ts     # sing-box JSON 輸出
-│   └── surge.ts       # Surge INI 輸出
-└── utils/
-    └── types.ts       # 型別定義 + 預設參數
+prism/
+├── src/
+│   ├── worker.ts          # Worker 路由 + 轉換 API
+│   ├── vercel.ts          # Vercel 配接器原始碼
+│   ├── frontend/          # HTML / CSS / 用戶端腳本
+│   ├── parsers/           # 訂閱解析 + 設定解析
+│   ├── generators/        # 輸出格式產生器
+│   └── utils/             # 型別定義 + 預設參數
+├── api/
+│   └── index.js           # 預構建的 Vercel 函式
+├── scripts/
+│   └── dev-vercel.js      # 本地 Vercel 開發伺服器
+├── public/                # Vercel 靜態佔位目錄
+├── vercel.json            # Vercel 路由設定
+├── wrangler.toml          # Cloudflare Workers 設定
+└── package.json
 ```
 
 ## 授權

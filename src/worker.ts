@@ -52,7 +52,7 @@ app.get('/sub', async (c: Context) => {
     if (urls.length === 1) {
       try {
         const response = await fetch(urls[0], {
-          headers: { 'User-Agent': 'clash-verge/2.0' },
+          headers: { 'User-Agent': 'clash-verge/v2.4.2' },
         });
         if (!response.ok) {
           return c.text(`错误：无法下载订阅链接，HTTP ${response.status}`, 502);
@@ -67,7 +67,7 @@ app.get('/sub', async (c: Context) => {
       try {
         const results = await Promise.all(urls.map(async (url) => {
           const response = await fetch(url, {
-            headers: { 'User-Agent': 'clash-verge/2.0' },
+            headers: { 'User-Agent': 'clash-verge/v2.4.2' },
           });
           if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
           if (!upstreamUserInfo) {
@@ -92,7 +92,7 @@ app.get('/sub', async (c: Context) => {
     if (params.config) {
       try {
         const configResponse = await fetch(params.config, {
-          headers: { 'User-Agent': 'clash-verge/2.0' },
+          headers: { 'User-Agent': 'clash-verge/v2.4.2' },
         });
         if (configResponse.ok) {
           const iniContent = await configResponse.text();
@@ -104,7 +104,7 @@ app.get('/sub', async (c: Context) => {
             .map(async (entry: RulesetEntry) => {
               try {
                 const ruleResponse = await fetch(entry.url, {
-                  headers: { 'User-Agent': 'clash-verge/2.0' },
+                  headers: { 'User-Agent': 'clash-verge/v2.4.2' },
                 });
                 if (ruleResponse.ok) {
                   const text = await ruleResponse.text();

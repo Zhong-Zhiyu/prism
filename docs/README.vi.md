@@ -2,7 +2,7 @@
 
 [English](../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Tiếng Việt](README.vi.md) | [العربية](README.ar.md) | [فارسی](README.fa.md)
 
-Công cụ chuyển đổi đăng ký proxy đa định dạng, có thể triển khai trên Cloudflare Workers.
+Công cụ chuyển đổi đăng ký proxy đa định dạng, có thể triển khai trên Cloudflare Workers và Vercel.
 
 ## Định dạng được hỗ trợ
 
@@ -29,29 +29,48 @@ Công cụ chuyển đổi đăng ký proxy đa định dạng, có thể triể
 git clone https://github.com/Motrans/prism.git
 cd prism
 npm install
-npm run build
-npx wrangler deploy
+npm run deploy
+```
+
+### Cách 3: Vercel
+
+```bash
+git clone https://github.com/Motrans/prism.git
+cd prism
+npm install
+npx vercel deploy --prod
+```
+
+Không cần bước build — `api/index.js` đã được build sẵn trong kho lưu trữ.
+
+## Phát triển cục bộ
+
+```bash
+npm run dev          # Cloudflare Workers → http://localhost:8787
+npm run dev:vercel   # Vercel (Node.js)  → http://localhost:8788
+npm run build        # Đóng gói cho Cloudflare Workers
+npm run build:vercel # Build lại api/index.js cho Vercel
 ```
 
 ## Cấu trúc dự án
 
 ```
-src/
-├── worker.ts          # Định tuyến Worker + API chuyển đổi
-├── frontend/
-│   ├── index.ts       # Điểm vào, lắp ráp HTML giao diện
-│   ├── css.ts         # Bảng định kiểu (bảng màu xám, RTL, đáp ứng)
-│   ├── body.ts        # HTML (biểu mẫu, danh sách thả xuống, điều khiển)
-│   └── script.ts      # Script phía máy khách (chủ đề, i18n, danh sách thả xuống)
-├── parsers/
-│   ├── ini-parser.ts  # Trình phân tích cú pháp .ini
-│   └── yaml-parser.ts # Trình phân tích cú pháp đăng ký Clash YAML
-├── generators/
-│   ├── clash.ts       # Đầu ra Clash YAML
-│   ├── singbox.ts     # Đầu ra sing-box JSON
-│   └── surge.ts       # Đầu ra Surge INI
-└── utils/
-    └── types.ts       # Định nghĩa kiểu + tham số mặc định
+prism/
+├── src/
+│   ├── worker.ts          # Định tuyến Worker + API chuyển đổi
+│   ├── vercel.ts          # Mã nguồn adapter Vercel
+│   ├── frontend/          # HTML / CSS / script máy khách
+│   ├── parsers/           # Trình phân tích đăng ký + cấu hình
+│   ├── generators/        # Trình tạo định dạng đầu ra
+│   └── utils/             # Định nghĩa kiểu + tham số mặc định
+├── api/
+│   └── index.js           # Hàm Vercel đã build sẵn
+├── scripts/
+│   └── dev-vercel.js      # Máy chủ phát triển Vercel cục bộ
+├── public/                # Thư mục tĩnh Vercel
+├── vercel.json            # Cấu hình định tuyến Vercel
+├── wrangler.toml          # Cấu hình Cloudflare Workers
+└── package.json
 ```
 
 ## Giấy phép

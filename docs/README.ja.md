@@ -2,7 +2,7 @@
 
 [English](../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Tiếng Việt](README.vi.md) | [العربية](README.ar.md) | [فارسی](README.fa.md)
 
-マルチフォーマット対応プロキシサブスクリプション変換ツール。Cloudflare Workers にデプロイ可能です。
+マルチフォーマット対応プロキシサブスクリプション変換ツール。Cloudflare Workers および Vercel にデプロイ可能です。
 
 ## 対応フォーマット
 
@@ -29,29 +29,48 @@
 git clone https://github.com/Motrans/prism.git
 cd prism
 npm install
-npm run build
-npx wrangler deploy
+npm run deploy
+```
+
+### 方法 3: Vercel
+
+```bash
+git clone https://github.com/Motrans/prism.git
+cd prism
+npm install
+npx vercel deploy --prod
+```
+
+ビルド手順は不要です——事前ビルド済みの `api/index.js` がリポジトリに含まれています。
+
+## ローカル開発
+
+```bash
+npm run dev          # Cloudflare Workers → http://localhost:8787
+npm run dev:vercel   # Vercel (Node.js)  → http://localhost:8788
+npm run build        # Cloudflare Workers 用にバンドル
+npm run build:vercel # Vercel 用の api/index.js を再ビルド
 ```
 
 ## プロジェクト構成
 
 ```
-src/
-├── worker.ts          # Worker ルーティング + 変換 API
-├── frontend/
-│   ├── index.ts       # エントリポイント、フロントエンド HTML を組み立て
-│   ├── css.ts         # スタイルシート（グレースケールパレット、RTL、レスポンシブ）
-│   ├── body.ts        # HTML 本体（フォーム、ドロップダウン、コントロール）
-│   └── script.ts      # クライアントスクリプト（テーマ、i18n、ドロップダウン）
-├── parsers/
-│   ├── ini-parser.ts  # .ini ルール設定パーサー
-│   └── yaml-parser.ts # Clash YAML サブスクリプションパーサー
-├── generators/
-│   ├── clash.ts       # Clash YAML 出力
-│   ├── singbox.ts     # sing-box JSON 出力
-│   └── surge.ts       # Surge INI 出力
-└── utils/
-    └── types.ts       # 型定義 + デフォルトパラメータ
+prism/
+├── src/
+│   ├── worker.ts          # Worker ルーティング + 変換 API
+│   ├── vercel.ts          # Vercel アダプターソース
+│   ├── frontend/          # HTML / CSS / クライアントスクリプト
+│   ├── parsers/           # サブスクリプション + 設定パーサー
+│   ├── generators/        # 出力フォーマットジェネレーター
+│   └── utils/             # 型定義 + デフォルトパラメータ
+├── api/
+│   └── index.js           # 事前ビルド済み Vercel 関数
+├── scripts/
+│   └── dev-vercel.js      # ローカル Vercel 開発サーバー
+├── public/                # Vercel 静的プレースホルダー
+├── vercel.json            # Vercel ルーティング設定
+├── wrangler.toml          # Cloudflare Workers 設定
+└── package.json
 ```
 
 ## ライセンス

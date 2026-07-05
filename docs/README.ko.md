@@ -2,7 +2,7 @@
 
 [English](../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Tiếng Việt](README.vi.md) | [العربية](README.ar.md) | [فارسی](README.fa.md)
 
-멀티 포맷 프록시 구독 변환 도구이며, Cloudflare Workers에 배포할 수 있습니다.
+멀티 포맷 프록시 구독 변환 도구이며, Cloudflare Workers 및 Vercel에 배포할 수 있습니다.
 
 ## 지원 형식
 
@@ -29,29 +29,48 @@
 git clone https://github.com/Motrans/prism.git
 cd prism
 npm install
-npm run build
-npx wrangler deploy
+npm run deploy
+```
+
+### 방법 3: Vercel
+
+```bash
+git clone https://github.com/Motrans/prism.git
+cd prism
+npm install
+npx vercel deploy --prod
+```
+
+빌드 단계가 필요 없습니다——사전 빌드된 `api/index.js`가 저장소에 포함되어 있습니다.
+
+## 로컬 개발
+
+```bash
+npm run dev          # Cloudflare Workers → http://localhost:8787
+npm run dev:vercel   # Vercel (Node.js)  → http://localhost:8788
+npm run build        # Cloudflare Workers용 번들
+npm run build:vercel # Vercel용 api/index.js 재빌드
 ```
 
 ## 프로젝트 구조
 
 ```
-src/
-├── worker.ts          # Worker 라우팅 + 변환 API
-├── frontend/
-│   ├── index.ts       # 진입점, 프론트엔드 HTML 구성
-│   ├── css.ts         # 스타일시트 (그레이스케일 팔레트, RTL, 반응형)
-│   ├── body.ts        # HTML 본문 (폼, 드롭다운, 컨트롤)
-│   └── script.ts      # 클라이언트 스크립트 (테마, i18n, 드롭다운)
-├── parsers/
-│   ├── ini-parser.ts  # .ini 규칙 설정 파서
-│   └── yaml-parser.ts # Clash YAML 구독 파서
-├── generators/
-│   ├── clash.ts       # Clash YAML 출력
-│   ├── singbox.ts     # sing-box JSON 출력
-│   └── surge.ts       # Surge INI 출력
-└── utils/
-    └── types.ts       # 타입 정의 + 기본 매개변수
+prism/
+├── src/
+│   ├── worker.ts          # Worker 라우팅 + 변환 API
+│   ├── vercel.ts          # Vercel 어댑터 소스
+│   ├── frontend/          # HTML / CSS / 클라이언트 스크립트
+│   ├── parsers/           # 구독 + 설정 파서
+│   ├── generators/        # 출력 형식 생성기
+│   └── utils/             # 타입 정의 + 기본 매개변수
+├── api/
+│   └── index.js           # 사전 빌드된 Vercel 함수
+├── scripts/
+│   └── dev-vercel.js      # 로컬 Vercel 개발 서버
+├── public/                # Vercel 정적 플레이스홀더
+├── vercel.json            # Vercel 라우팅 설정
+├── wrangler.toml          # Cloudflare Workers 설정
+└── package.json
 ```
 
 ## 라이선스
