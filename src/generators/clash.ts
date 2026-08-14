@@ -97,9 +97,9 @@ export function generateClashConfig(
                   const last = parts[parts.length - 1]?.trim();
                   if (last === 'no-resolve' && parts.length >= 3) {
                     const base = parts.slice(0, -1).join(',');
-                    lines.push(`  - ${base},${entry.groupName},no-resolve`);
+                    lines.push(`  - ${formatRule(`${base},${entry.groupName},no-resolve`)}`);
                   } else {
-                    lines.push(`  - ${rule},${entry.groupName}`);
+                    lines.push(`  - ${formatRule(`${rule},${entry.groupName}`)}`);
                   }
                 }
               } else {
@@ -137,7 +137,7 @@ export function generateClashConfig(
       } else if (Array.isArray(value) && value.length > 0) {
         lines.push('rules:');
         for (const rule of value as string[]) {
-          lines.push(`  - ${rule}`);
+          lines.push(`  - ${formatRule(rule)}`);
         }
       }
       continue;
@@ -161,7 +161,7 @@ export function generateClashConfig(
         lines.push('hosts:');
         for (const [domain, ip] of Object.entries(hosts)) {
           if (typeof ip === 'string') {
-            lines.push(`  '${domain}': ${ip}`);
+            lines.push(`  '${domain.replace(/'/g, "''")}': "${esc(ip)}"`);
           } else {
             emitYamlKeyValue(lines, `'${domain}'`, ip, 2);
           }
@@ -202,7 +202,7 @@ function formatClashProxy(node: ProxyNode, params: ConversionParams): string {
     kv.push(`plugin: ${node.plugin}`);
     if (node['plugin-opts']) {
       const opts = Object.entries(node['plugin-opts'] as Record<string,string>)
-        .map(([k, v]) => `${k}: "${esc(v)}"`).join(', ');
+        .map(([k, v]) => `${safeKey(k)}: "${esc(v)}"`).join(', ');
       kv.push(`plugin-opts: {${opts}}`);
     }
   }
@@ -215,7 +215,7 @@ function formatClashProxy(node: ProxyNode, params: ConversionParams): string {
   if (node.sni) kv.push(`sni: "${esc(node.sni)}"`);
   if (node.alpn) {
     const arr = Array.isArray(node.alpn) ? node.alpn : String(node.alpn).split(/[,;]/).map((s:string)=>s.trim()).filter(Boolean);
-    kv.push(`alpn: [${arr.map((a:string)=>`"${a}"`).join(', ')}]`);
+    kv.push(`alpn: [${arr.map((a:string)=>`"${esc(a)}"`).join(', ')}]`);
   }
 
   if (params.tls13) kv.push('client-fingerprint: chrome');
@@ -224,9 +224,9 @@ function formatClashProxy(node: ProxyNode, params: ConversionParams): string {
   if (params.tls13) skip.add('client-fingerprint');
   for (const [k, v] of Object.entries(node)) {
     if (skip.has(k)) continue;
-    if (typeof v === 'boolean') kv.push(`${k}: ${v}`);
-    else if (typeof v === 'number') kv.push(`${k}: ${v}`);
-    else if (typeof v === 'string') kv.push(`${k}: "${esc(v)}"`);
+    if (typeof v === 'boolean') kv.push(`${safeKey(k)}: ${v}`);
+    else if (typeof v === 'number') kv.push(`${safeKey(k)}: ${v}`);
+    else if (typeof v === 'string') kv.push(`${safeKey(k)}: "${esc(v)}"`);
   }
 
   return `  - { ${kv.join(', ')} }`;
@@ -287,7 +287,22 @@ function writeProxyGroup(
 }
 
 function esc(str: string): string {
-  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
+/**
+ * YAML 规则行安全化：包含冒号空格、" #" 或控制字符时加引号
+ */
+function formatRule(rule: string): string {
+  if (/:\s|\s#|[\n\r\t]/.test(rule)) {
+    return `"${esc(rule)}"`;
+  }
+  return rule;
 }
 
 /**

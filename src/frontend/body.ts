@@ -136,6 +136,9 @@ export const BODY = `<body>
           <label data-i18n="labelExclude">排除节点（正则）</label>
           <input type="text" id="exclude" data-i18n-placeholder="placeholderExclude" placeholder="如 剩余|官网|到期">
         </div>
+      </div>      <div class="form-group">
+        <label data-i18n="labelUa">自定义 User-Agent（可选）</label>
+        <input type="text" id="ua" data-i18n-placeholder="placeholderUa" placeholder="默认 clash-verge/v2.4.2">
       </div>
     </div>
 

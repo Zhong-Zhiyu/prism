@@ -2310,9 +2310,19 @@ function parseProxyBrace(raw2) {
 }
 function findMatchingBrace(str, start) {
   let depth = 0;
+  let inStr = null;
   for (let i = start; i < str.length; i++) {
-    if (str[i] === "{") depth++;
-    else if (str[i] === "}") {
+    const ch = str[i];
+    if (inStr) {
+      if (ch === inStr && str[i - 1] !== "\\") inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
       depth--;
       if (depth === 0) return i;
     }
@@ -2373,7 +2383,7 @@ function extractProxyGroups(lines) {
     if (currentGroup) {
       const colonIdx = trimmed.indexOf(":");
       if (colonIdx > 0) {
-        const key = trimmed.substring(0, colonIdx).trim();
+        const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
         const value = trimmed.substring(colonIdx + 1).trim();
         if (key === "type") {
           currentGroup.type = value;
@@ -2432,9 +2442,9 @@ function extractTopLevelFields(lines, config) {
     if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("proxies:") || trimmed.startsWith("proxy-groups:") || trimmed.startsWith("rules:") || trimmed.startsWith("-") || line.startsWith(" ")) {
       continue;
     }
-    const colonIdx = trimmed.indexOf(":");
+    const colonIdx = findFlowMappingColon(trimmed);
     if (colonIdx <= 0) continue;
-    const key = trimmed.substring(0, colonIdx).trim();
+    const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
     const rawVal = trimmed.substring(colonIdx + 1).trim();
     if (!rawVal || rawVal === "{}") {
       const blockLines = [];
@@ -2508,12 +2518,12 @@ function parseNestedDict(lines) {
       i++;
       continue;
     }
-    const colonIdx = trimmed.indexOf(":");
+    const colonIdx = findFlowMappingColon(trimmed);
     if (colonIdx <= 0) {
       i++;
       continue;
     }
-    const key = trimmed.substring(0, colonIdx).trim();
+    const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
     const rawVal = trimmed.substring(colonIdx + 1).trim();
     if (rawVal) {
       const extracted = extractYamlValue(rawVal);
@@ -2558,12 +2568,15 @@ function parseNestedDict(lines) {
   return result;
 }
 function parseProxiesList(content) {
-  return content.split(",").map((s) => extractYamlValue(s.trim())).filter(Boolean);
+  return splitYamlFlow(content).map((s) => extractYamlValue(s.trim())).filter(Boolean);
 }
 function extractYamlValue(raw2) {
   let s = raw2.trim();
-  if (s.startsWith("'") && s.endsWith("'") || s.startsWith('"') && s.endsWith('"')) {
-    s = s.slice(1, -1);
+  if (s.startsWith("'") && s.endsWith("'") && s.length >= 2) {
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
   return s;
 }
@@ -2587,7 +2600,7 @@ function parseYamlFlow(raw2) {
       const obj = {};
       const pairs = splitYamlFlow(inner);
       for (const pair of pairs) {
-        const colonIdx = pair.indexOf(":");
+        const colonIdx = findFlowMappingColon(pair);
         if (colonIdx <= 0) continue;
         const k = extractYamlValue(pair.substring(0, colonIdx).trim());
         const v = parseYamlFlow(extractYamlValue(pair.substring(colonIdx + 1).trim()));
@@ -2653,6 +2666,22 @@ function splitYamlFlow(content) {
   if (current) result.push(current);
   return result;
 }
+function findFlowMappingColon(pair) {
+  let inStr = null;
+  for (let i = 0; i < pair.length; i++) {
+    const ch = pair[i];
+    if (inStr) {
+      if (ch === inStr && pair[i - 1] !== "\\") inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      continue;
+    }
+    if (ch === ":") return i;
+  }
+  return -1;
+}
 function simpleJsonify(str) {
   str = str.replace(/,\s*([}\]])/g, "$1");
   str = str.replace(/(\{|\,)\s*([a-zA-Z_][\w-]*)\s*:/g, '$1"$2":');
@@ -2670,20 +2699,11 @@ function manualExtractProxy(str) {
     if (colonIdx === -1) continue;
     const key = pair.substring(0, colonIdx).trim().replace(/^['"]|['"]$/g, "");
     let value = pair.substring(colonIdx + 1).trim();
-    const maybeQuoted = value;
-    if (maybeQuoted.startsWith("'") && maybeQuoted.endsWith("'") || maybeQuoted.startsWith('"') && maybeQuoted.endsWith('"')) {
-      value = maybeQuoted.slice(1, -1);
-    }
+    value = extractYamlValue(value);
     if (typeof value === "string" && value.startsWith("[") && value.endsWith("]")) {
       const inner = value.slice(1, -1).trim();
       if (inner) {
-        value = inner.split(",").map((s) => {
-          let t = s.trim();
-          if (t.startsWith("'") && t.endsWith("'") || t.startsWith('"') && t.endsWith('"')) {
-            t = t.slice(1, -1);
-          }
-          return t;
-        }).filter((s) => s.length > 0);
+        value = splitYamlFlow(inner).map((s) => extractYamlValue(s.trim())).filter((s) => s.length > 0);
       } else {
         value = [];
       }
@@ -2697,11 +2717,8 @@ function manualExtractProxy(str) {
           const scIdx = sp.indexOf(":");
           if (scIdx === -1) continue;
           const sk = sp.substring(0, scIdx).trim().replace(/^['"]|['"]$/g, "");
-          let sv = sp.substring(scIdx + 1).trim();
+          let sv = extractYamlValue(sp.substring(scIdx + 1).trim());
           if (typeof sv === "string") {
-            if (sv.startsWith("'") && sv.endsWith("'") || sv.startsWith('"') && sv.endsWith('"')) {
-              sv = sv.slice(1, -1);
-            }
             if (sv === "true") sv = true;
             else if (sv === "false") sv = false;
             else if (typeof sv === "string" && /^\d+$/.test(sv)) sv = parseInt(sv, 10);
@@ -2731,9 +2748,7 @@ function parseInlineProxyGroup(inline) {
     if (colonIdx === -1) continue;
     const key = pair.substring(0, colonIdx).trim().replace(/^['"]|['"]$/g, "");
     let value = pair.substring(colonIdx + 1).trim();
-    if (value.startsWith("'") && value.endsWith("'") || value.startsWith('"') && value.endsWith('"')) {
-      value = value.slice(1, -1);
-    }
+    value = extractYamlValue(value);
     if (key === "name") {
       group.name = value;
     } else if (key === "type") {
@@ -2741,13 +2756,7 @@ function parseInlineProxyGroup(inline) {
     } else if (key === "proxies" && value.startsWith("[") && value.endsWith("]")) {
       const inner = value.slice(1, -1).trim();
       if (inner) {
-        group.proxies = inner.split(",").map((s) => {
-          let t = s.trim();
-          if (t.startsWith("'") && t.endsWith("'") || t.startsWith('"') && t.endsWith('"')) {
-            t = t.slice(1, -1);
-          }
-          return t;
-        }).filter((s) => s.length > 0);
+        group.proxies = splitYamlFlow(inner).map((s) => extractYamlValue(s.trim())).filter((s) => s.length > 0);
       }
     } else if (key === "url") {
       group.url = value;
@@ -2765,8 +2774,20 @@ function parseInlineProxyGroup(inline) {
 function splitTopLevel(content) {
   const result = [];
   let depth = 0;
+  let inStr = null;
   let current = "";
-  for (const ch of content) {
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (inStr) {
+      current += ch;
+      if (ch === inStr && content[i - 1] !== "\\") inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      current += ch;
+      continue;
+    }
     if (ch === "{" || ch === "[") depth++;
     else if (ch === "}" || ch === "]") depth--;
     if (ch === "," && depth === 0) {
@@ -3032,9 +3053,9 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
                   const last = parts[parts.length - 1]?.trim();
                   if (last === "no-resolve" && parts.length >= 3) {
                     const base = parts.slice(0, -1).join(",");
-                    lines.push(`  - ${base},${entry.groupName},no-resolve`);
+                    lines.push(`  - ${formatRule(`${base},${entry.groupName},no-resolve`)}`);
                   } else {
-                    lines.push(`  - ${rule},${entry.groupName}`);
+                    lines.push(`  - ${formatRule(`${rule},${entry.groupName}`)}`);
                   }
                 }
               } else {
@@ -3071,7 +3092,7 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
       } else if (Array.isArray(value) && value.length > 0) {
         lines.push("rules:");
         for (const rule of value) {
-          lines.push(`  - ${rule}`);
+          lines.push(`  - ${formatRule(rule)}`);
         }
       }
       continue;
@@ -3091,7 +3112,7 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
         lines.push("hosts:");
         for (const [domain, ip] of Object.entries(hosts)) {
           if (typeof ip === "string") {
-            lines.push(`  '${domain}': ${ip}`);
+            lines.push(`  '${domain.replace(/'/g, "''")}': "${esc(ip)}"`);
           } else {
             emitYamlKeyValue(lines, `'${domain}'`, ip, 2);
           }
@@ -3123,7 +3144,7 @@ function formatClashProxy(node, params) {
   if (node.plugin) {
     kv.push(`plugin: ${node.plugin}`);
     if (node["plugin-opts"]) {
-      const opts = Object.entries(node["plugin-opts"]).map(([k, v]) => `${k}: "${esc(v)}"`).join(", ");
+      const opts = Object.entries(node["plugin-opts"]).map(([k, v]) => `${safeKey(k)}: "${esc(v)}"`).join(", ");
       kv.push(`plugin-opts: {${opts}}`);
     }
   }
@@ -3134,16 +3155,16 @@ function formatClashProxy(node, params) {
   if (node.sni) kv.push(`sni: "${esc(node.sni)}"`);
   if (node.alpn) {
     const arr = Array.isArray(node.alpn) ? node.alpn : String(node.alpn).split(/[,;]/).map((s) => s.trim()).filter(Boolean);
-    kv.push(`alpn: [${arr.map((a) => `"${a}"`).join(", ")}]`);
+    kv.push(`alpn: [${arr.map((a) => `"${esc(a)}"`).join(", ")}]`);
   }
   if (params.tls13) kv.push("client-fingerprint: chrome");
   const skip = /* @__PURE__ */ new Set(["name", "type", "server", "port", "cipher", "password", "uuid", "plugin", "plugin-opts", "udp", "tfo", "skip-cert-verify", "sni", "alpn"]);
   if (params.tls13) skip.add("client-fingerprint");
   for (const [k, v] of Object.entries(node)) {
     if (skip.has(k)) continue;
-    if (typeof v === "boolean") kv.push(`${k}: ${v}`);
-    else if (typeof v === "number") kv.push(`${k}: ${v}`);
-    else if (typeof v === "string") kv.push(`${k}: "${esc(v)}"`);
+    if (typeof v === "boolean") kv.push(`${safeKey(k)}: ${v}`);
+    else if (typeof v === "number") kv.push(`${safeKey(k)}: ${v}`);
+    else if (typeof v === "string") kv.push(`${safeKey(k)}: "${esc(v)}"`);
   }
   return `  - { ${kv.join(", ")} }`;
 }
@@ -3203,7 +3224,13 @@ function writeProxyGroup(lines, groupType, name, proxies, url, interval, allNode
   lines.push(`  - { ${parts.join(", ")} }`);
 }
 function esc(str) {
-  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+}
+function formatRule(rule) {
+  if (/:\s|\s#|[\n\r\t]/.test(rule)) {
+    return `"${esc(rule)}"`;
+  }
+  return rule;
 }
 function safeKey(key) {
   if (/^[*&!{}[\]>|%@`"'?#-]/.test(key) || /[:#\s]/.test(key)) {
@@ -4194,6 +4221,9 @@ var init_body2 = __esm({
           <label data-i18n="labelExclude">\u6392\u9664\u8282\u70B9\uFF08\u6B63\u5219\uFF09</label>
           <input type="text" id="exclude" data-i18n-placeholder="placeholderExclude" placeholder="\u5982 \u5269\u4F59|\u5B98\u7F51|\u5230\u671F">
         </div>
+      </div>      <div class="form-group">
+        <label data-i18n="labelUa">\u81EA\u5B9A\u4E49 User-Agent\uFF08\u53EF\u9009\uFF09</label>
+        <input type="text" id="ua" data-i18n-placeholder="placeholderUa" placeholder="\u9ED8\u8BA4 clash-verge/v2.4.2">
       </div>
     </div>
 
@@ -4495,7 +4525,7 @@ var I18N = {
     btnGenerate: '\u751F\u6210\u8BA2\u9605\u94FE\u63A5', labelResult: '\u751F\u6210\u7684\u8BA2\u9605\u94FE\u63A5\uFF1A',
     btnCopy: '\u590D\u5236\u94FE\u63A5', btnDownload: '\u4E0B\u8F7D\u914D\u7F6E',
     msgEnterUrl: '\u8BF7\u8F93\u5165\u8BA2\u9605\u94FE\u63A5', msgGenerated: '\u8BA2\u9605\u94FE\u63A5\u5DF2\u751F\u6210',
-    labelRename: '\u8282\u70B9\u91CD\u547D\u540D\uFF08\u53EF\u9009\uFF09', placeholderRename: '\u5982 \u9999\u6E2F@HK|\u65E5\u672C@JP', btnAddUrl: '\u6DFB\u52A0\u8BA2\u9605\u94FE\u63A5',
+    labelRename: '\u8282\u70B9\u91CD\u547D\u540D\uFF08\u53EF\u9009\uFF09', placeholderRename: '\u5982 \u9999\u6E2F@HK|\u65E5\u672C@JP', btnAddUrl: '\u6DFB\u52A0\u8BA2\u9605\u94FE\u63A5', labelUa: '\u81EA\u5B9A\u4E49 User-Agent\uFF08\u53EF\u9009\uFF09', placeholderUa: '\u9ED8\u8BA4 clash-verge/v2.4.2',
     msgCopied: '\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F', msgDownloadStarted: '\u4E0B\u8F7D\u5DF2\u5F00\u59CB', msgDownloadFailed: '\u4E0B\u8F7D\u5931\u8D25',
   },
   'en': {
@@ -4514,7 +4544,7 @@ var I18N = {
     btnGenerate: 'Generate Subscription', labelResult: 'Subscription URL:',
     btnCopy: 'Copy URL', btnDownload: 'Download Config',
     msgEnterUrl: 'Please enter a subscription URL', msgGenerated: 'Subscription URL generated',
-    labelRename: 'Rename Nodes (optional)', placeholderRename: 'e.g. HK@HongKong|JP@Japan', btnAddUrl: 'Add Subscription',
+    labelRename: 'Rename Nodes (optional)', placeholderRename: 'e.g. HK@HongKong|JP@Japan', btnAddUrl: 'Add Subscription', labelUa: 'Custom User-Agent (optional)', placeholderUa: 'Default: clash-verge/v2.4.2',
     msgCopied: 'Copied to clipboard', msgDownloadStarted: 'Download started', msgDownloadFailed: 'Download failed',
   },
   'ar': {
@@ -4534,7 +4564,7 @@ var I18N = {
     btnGenerate: '\u0625\u0646\u0634\u0627\u0621 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643', labelResult: '\u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643:',
     btnCopy: '\u0646\u0633\u062E \u0627\u0644\u0631\u0627\u0628\u0637', btnDownload: '\u062A\u0646\u0632\u064A\u0644 \u0627\u0644\u062A\u0643\u0648\u064A\u0646',
     msgEnterUrl: '\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643', msgGenerated: '\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643',
-    labelRename: '\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0639\u0642\u062F (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0625\u0636\u0627\u0641\u0629 \u0627\u0634\u062A\u0631\u0627\u0643',
+    labelRename: '\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0639\u0642\u062F (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0625\u0636\u0627\u0641\u0629 \u0627\u0634\u062A\u0631\u0627\u0643', labelUa: 'User-Agent \u0645\u062E\u0635\u0635 (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderUa: '\u0627\u0644\u0627\u0641\u062A\u0631\u0627\u0636\u064A: clash-verge/v2.4.2',
     msgCopied: '\u062A\u0645 \u0627\u0644\u0646\u0633\u062E \u0625\u0644\u0649 \u0627\u0644\u062D\u0627\u0641\u0638\u0629', msgDownloadStarted: '\u0628\u062F\u0623 \u0627\u0644\u062A\u0646\u0632\u064A\u0644', msgDownloadFailed: '\u0641\u0634\u0644 \u0627\u0644\u062A\u0646\u0632\u064A\u0644',
   },
   'zh-Hant': {
@@ -4553,7 +4583,7 @@ var I18N = {
     btnGenerate: '\u751F\u6210\u8A02\u95B1\u9023\u7D50', labelResult: '\u751F\u6210\u7684\u8A02\u95B1\u9023\u7D50\uFF1A',
     btnCopy: '\u8907\u88FD\u9023\u7D50', btnDownload: '\u4E0B\u8F09\u8A2D\u5B9A\u6A94',
     msgEnterUrl: '\u8ACB\u8F38\u5165\u8A02\u95B1\u9023\u7D50', msgGenerated: '\u8A02\u95B1\u9023\u7D50\u5DF2\u751F\u6210',
-    labelRename: '\u7BC0\u9EDE\u91CD\u547D\u540D\uFF08\u53EF\u9078\uFF09', placeholderRename: '\u5982 HK@HongKong|JP@Japan', btnAddUrl: '\u65B0\u589E\u8A02\u95B1\u9023\u7D50',
+    labelRename: '\u7BC0\u9EDE\u91CD\u547D\u540D\uFF08\u53EF\u9078\uFF09', placeholderRename: '\u5982 HK@HongKong|JP@Japan', btnAddUrl: '\u65B0\u589E\u8A02\u95B1\u9023\u7D50', labelUa: '\u81EA\u8A02 User-Agent\uFF08\u53EF\u9078\uFF09', placeholderUa: '\u9810\u8A2D clash-verge/v2.4.2',
     msgCopied: '\u5DF2\u8907\u88FD\u5230\u526A\u8CBC\u7C3F', msgDownloadStarted: '\u4E0B\u8F09\u5DF2\u958B\u59CB', msgDownloadFailed: '\u4E0B\u8F09\u5931\u6557',
   },
   'ja': {
@@ -4572,7 +4602,7 @@ var I18N = {
     btnGenerate: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3 URL \u3092\u751F\u6210', labelResult: '\u751F\u6210\u3055\u308C\u305F URL:',
     btnCopy: 'URL \u3092\u30B3\u30D4\u30FC', btnDownload: '\u8A2D\u5B9A\u3092\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9',
     msgEnterUrl: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3 URL \u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044', msgGenerated: 'URL \u304C\u751F\u6210\u3055\u308C\u307E\u3057\u305F',
-    labelRename: '\u30CE\u30FC\u30C9\u540D\u5909\u66F4\uFF08\u4EFB\u610F\uFF09', placeholderRename: '\u4F8B: HK@HongKong|JP@Japan', btnAddUrl: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3\u3092\u8FFD\u52A0',
+    labelRename: '\u30CE\u30FC\u30C9\u540D\u5909\u66F4\uFF08\u4EFB\u610F\uFF09', placeholderRename: '\u4F8B: HK@HongKong|JP@Japan', btnAddUrl: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3\u3092\u8FFD\u52A0', labelUa: '\u30AB\u30B9\u30BF\u30E0 User-Agent\uFF08\u4EFB\u610F\uFF09', placeholderUa: '\u30C7\u30D5\u30A9\u30EB\u30C8: clash-verge/v2.4.2',
     msgCopied: '\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F', msgDownloadStarted: '\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F', msgDownloadFailed: '\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9\u306B\u5931\u6557\u3057\u307E\u3057\u305F',
   },
   'ko': {
@@ -4591,7 +4621,7 @@ var I18N = {
     btnGenerate: '\uAD6C\uB3C5 \uB9C1\uD06C \uC0DD\uC131', labelResult: '\uC0DD\uC131\uB41C \uAD6C\uB3C5 URL:',
     btnCopy: 'URL \uBCF5\uC0AC', btnDownload: '\uC124\uC815 \uB2E4\uC6B4\uB85C\uB4DC',
     msgEnterUrl: '\uAD6C\uB3C5 URL\uC744 \uC785\uB825\uD558\uC138\uC694', msgGenerated: '\uAD6C\uB3C5 URL\uC774 \uC0DD\uC131\uB418\uC5C8\uC2B5\uB2C8\uB2E4',
-    labelRename: '\uB178\uB4DC \uC774\uB984 \uBCC0\uACBD (\uC120\uD0DD\uC0AC\uD56D)', placeholderRename: '\uC608: HK@HongKong|JP@Japan', btnAddUrl: '\uAD6C\uB3C5 \uCD94\uAC00',
+    labelRename: '\uB178\uB4DC \uC774\uB984 \uBCC0\uACBD (\uC120\uD0DD\uC0AC\uD56D)', placeholderRename: '\uC608: HK@HongKong|JP@Japan', btnAddUrl: '\uAD6C\uB3C5 \uCD94\uAC00', labelUa: '\uC0AC\uC6A9\uC790 \uC9C0\uC815 User-Agent (\uC120\uD0DD\uC0AC\uD56D)', placeholderUa: '\uAE30\uBCF8\uAC12: clash-verge/v2.4.2',
     msgCopied: '\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uB418\uC5C8\uC2B5\uB2C8\uB2E4', msgDownloadStarted: '\uB2E4\uC6B4\uB85C\uB4DC\uAC00 \uC2DC\uC791\uB418\uC5C8\uC2B5\uB2C8\uB2E4', msgDownloadFailed: '\uB2E4\uC6B4\uB85C\uB4DC \uC2E4\uD328',
   },
   'ru': {
@@ -4610,7 +4640,7 @@ var I18N = {
     btnGenerate: '\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443', labelResult: '\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 URL \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438:',
     btnCopy: '\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C URL', btnDownload: '\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E',
     msgEnterUrl: '\u0412\u0432\u0435\u0434\u0438\u0442\u0435 URL \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438', msgGenerated: '\u0421\u0441\u044B\u043B\u043A\u0430 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0430',
-    labelRename: '\u041F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C \u0443\u0437\u043B\u044B (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderRename: '\u043D\u0430\u043F\u0440. HK@HongKong|JP@Japan', btnAddUrl: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0443',
+    labelRename: '\u041F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C \u0443\u0437\u043B\u044B (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderRename: '\u043D\u0430\u043F\u0440. HK@HongKong|JP@Japan', btnAddUrl: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0443', labelUa: '\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0441\u043A\u0438\u0439 User-Agent (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderUa: '\u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E: clash-verge/v2.4.2',
     msgCopied: '\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043E \u0432 \u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430', msgDownloadStarted: '\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043D\u0430\u0447\u0430\u043B\u0430\u0441\u044C', msgDownloadFailed: '\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438',
   },
   'vi': {
@@ -4629,7 +4659,7 @@ var I18N = {
     btnGenerate: 'T\u1EA1o li\xEAn k\u1EBFt \u0111\u0103ng k\xFD', labelResult: 'URL \u0111\u0103ng k\xFD \u0111\xE3 t\u1EA1o:',
     btnCopy: 'Sao ch\xE9p URL', btnDownload: 'T\u1EA3i v\u1EC1 c\u1EA5u h\xECnh',
     msgEnterUrl: 'Vui l\xF2ng nh\u1EADp URL \u0111\u0103ng k\xFD', msgGenerated: '\u0110\xE3 t\u1EA1o URL \u0111\u0103ng k\xFD',
-    labelRename: '\u0110\u1ED5i t\xEAn n\xFAt (t\xF9y ch\u1ECDn)', placeholderRename: 'vd: HK@HongKong|JP@Japan', btnAddUrl: 'Th\xEAm \u0111\u0103ng k\xFD',
+    labelRename: '\u0110\u1ED5i t\xEAn n\xFAt (t\xF9y ch\u1ECDn)', placeholderRename: 'vd: HK@HongKong|JP@Japan', btnAddUrl: 'Th\xEAm \u0111\u0103ng k\xFD', labelUa: 'User-Agent t\xF9y ch\u1EC9nh (t\xF9y ch\u1ECDn)', placeholderUa: 'M\u1EB7c \u0111\u1ECBnh: clash-verge/v2.4.2',
     msgCopied: '\u0110\xE3 sao ch\xE9p v\xE0o clipboard', msgDownloadStarted: 'B\u1EAFt \u0111\u1EA7u t\u1EA3i xu\u1ED1ng', msgDownloadFailed: 'T\u1EA3i xu\u1ED1ng th\u1EA5t b\u1EA1i',
   },
   'fa': {
@@ -4648,7 +4678,7 @@ var I18N = {
     btnGenerate: '\u0627\u06CC\u062C\u0627\u062F \u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9', labelResult: '\u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0627\u06CC\u062C\u0627\u062F \u0634\u062F\u0647:',
     btnCopy: '\u06A9\u067E\u06CC URL', btnDownload: '\u062F\u0627\u0646\u0644\u0648\u062F \u067E\u06CC\u06A9\u0631\u0628\u0646\u062F\u06CC',
     msgEnterUrl: '\u0644\u0637\u0641\u0627\u064B URL \u0627\u0634\u062A\u0631\u0627\u06A9 \u0631\u0627 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F', msgGenerated: '\u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0627\u06CC\u062C\u0627\u062F \u0634\u062F',
-    labelRename: '\u062A\u063A\u06CC\u06CC\u0631 \u0646\u0627\u0645 \u0633\u0631\u0648\u0631 (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0627\u0641\u0632\u0648\u062F\u0646 \u0627\u0634\u062A\u0631\u0627\u06A9',
+    labelRename: '\u062A\u063A\u06CC\u06CC\u0631 \u0646\u0627\u0645 \u0633\u0631\u0648\u0631 (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0627\u0641\u0632\u0648\u062F\u0646 \u0627\u0634\u062A\u0631\u0627\u06A9', labelUa: 'User-Agent \u0633\u0641\u0627\u0631\u0634\u06CC (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderUa: '\u067E\u06CC\u0634\u200C\u0641\u0631\u0636: clash-verge/v2.4.2',
     msgCopied: '\u062F\u0631 \u06A9\u0644\u06CC\u067E\u200C\u0628\u0648\u0631\u062F \u06A9\u067E\u06CC \u0634\u062F', msgDownloadStarted: '\u062F\u0627\u0646\u0644\u0648\u062F \u0622\u063A\u0627\u0632 \u0634\u062F', msgDownloadFailed: '\u062F\u0627\u0646\u0644\u0648\u062F \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F',
   },
 
@@ -4899,6 +4929,8 @@ function generateSubscription() {
   if (exclude) params.set('exclude', exclude);
   var rename = document.getElementById('rename').value.trim();
   if (rename) params.set('rename', rename);
+  var ua = document.getElementById('ua').value.trim();
+  if (ua) params.set('ua', ua);
 
   var apiUrl = window.location.origin + '/sub?' + params.toString();
 
@@ -5016,8 +5048,14 @@ function parseQueryParams(c) {
     sort: parseBool(q["sort"]) ?? DEFAULT_PARAMS.sort,
     scv: parseBool(q["scv"]) ?? DEFAULT_PARAMS.scv,
     expand: parseBool(q["expand"]) ?? DEFAULT_PARAMS.expand,
-    tls13: parseBool(q["tls13"]) ?? DEFAULT_PARAMS.tls13
+    tls13: parseBool(q["tls13"]) ?? DEFAULT_PARAMS.tls13,
+    ua: q["ua"] || void 0
   };
+}
+function buildUpstreamHeaders(c) {
+  const q = c.req.query();
+  const ua = q["ua"] && q["ua"].trim() || "clash-verge/v2.4.2";
+  return { "User-Agent": ua };
 }
 function parseBool(value) {
   if (value === void 0 || value === null) return void 0;
@@ -5095,10 +5133,11 @@ var init_worker = __esm({
         if (urls.length === 1) {
           try {
             const response = await fetch(urls[0], {
-              headers: { "User-Agent": "clash-verge/v2.4.2" }
+              headers: buildUpstreamHeaders(c)
             });
             if (!response.ok) {
-              return c.text(`\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u8BA2\u9605\u94FE\u63A5\uFF0CHTTP ${response.status}`, 502);
+              const snippet = (await response.text()).slice(0, 300).replace(/\s+/g, " ").trim();
+              return c.text(`\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u8BA2\u9605\u94FE\u63A5\uFF0CHTTP ${response.status}${snippet ? "\uFF1A" + snippet : ""}`, 502);
             }
             upstreamUserInfo = response.headers.get("subscription-userinfo");
             sourceConfig = parseClashYaml(await response.text());
@@ -5109,7 +5148,7 @@ var init_worker = __esm({
           try {
             const results = await Promise.all(urls.map(async (url) => {
               const response = await fetch(url, {
-                headers: { "User-Agent": "clash-verge/v2.4.2" }
+                headers: buildUpstreamHeaders(c)
               });
               if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
               if (!upstreamUserInfo) {
@@ -5130,7 +5169,7 @@ var init_worker = __esm({
         if (params.config) {
           try {
             const configResponse = await fetch(params.config, {
-              headers: { "User-Agent": "clash-verge/v2.4.2" }
+              headers: buildUpstreamHeaders(c)
             });
             if (configResponse.ok) {
               const iniContent = await configResponse.text();
@@ -5138,7 +5177,7 @@ var init_worker = __esm({
               const downloadPromises = iniConfig.rulesetEntries.filter((entry) => !entry.isSpecial && entry.url).map(async (entry) => {
                 try {
                   const ruleResponse = await fetch(entry.url, {
-                    headers: { "User-Agent": "clash-verge/v2.4.2" }
+                    headers: buildUpstreamHeaders(c)
                   });
                   if (ruleResponse.ok) {
                     const text = await ruleResponse.text();

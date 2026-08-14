@@ -52,10 +52,11 @@ app.get('/sub', async (c: Context) => {
     if (urls.length === 1) {
       try {
         const response = await fetch(urls[0], {
-          headers: { 'User-Agent': 'clash-verge/v2.4.2' },
+          headers: buildUpstreamHeaders(c),
         });
         if (!response.ok) {
-          return c.text(`错误：无法下载订阅链接，HTTP ${response.status}`, 502);
+          const snippet = (await response.text()).slice(0, 300).replace(/\s+/g, ' ').trim();
+          return c.text(`错误：无法下载订阅链接，HTTP ${response.status}${snippet ? '：' + snippet : ''}`, 502);
         }
         upstreamUserInfo = response.headers.get('subscription-userinfo');
         sourceConfig = parseClashYaml(await response.text());
@@ -67,7 +68,7 @@ app.get('/sub', async (c: Context) => {
       try {
         const results = await Promise.all(urls.map(async (url) => {
           const response = await fetch(url, {
-            headers: { 'User-Agent': 'clash-verge/v2.4.2' },
+            headers: buildUpstreamHeaders(c),
           });
           if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
           if (!upstreamUserInfo) {
@@ -92,7 +93,7 @@ app.get('/sub', async (c: Context) => {
     if (params.config) {
       try {
         const configResponse = await fetch(params.config, {
-          headers: { 'User-Agent': 'clash-verge/v2.4.2' },
+          headers: buildUpstreamHeaders(c),
         });
         if (configResponse.ok) {
           const iniContent = await configResponse.text();
@@ -104,7 +105,7 @@ app.get('/sub', async (c: Context) => {
             .map(async (entry: RulesetEntry) => {
               try {
                 const ruleResponse = await fetch(entry.url, {
-                  headers: { 'User-Agent': 'clash-verge/v2.4.2' },
+                  headers: buildUpstreamHeaders(c),
                 });
                 if (ruleResponse.ok) {
                   const text = await ruleResponse.text();
@@ -214,9 +215,15 @@ function parseQueryParams(c: Context): ConversionParams {
     scv: parseBool(q['scv']) ?? DEFAULT_PARAMS.scv,
     expand: parseBool(q['expand']) ?? DEFAULT_PARAMS.expand,
     tls13: parseBool(q['tls13']) ?? DEFAULT_PARAMS.tls13,
+    ua: q['ua'] || undefined,
   };
 }
 
+function buildUpstreamHeaders(c: Context): Record<string, string> {
+  const q = c.req.query() as Record<string, string>;
+  const ua = (q['ua'] && q['ua'].trim()) || 'clash-verge/v2.4.2';
+  return { 'User-Agent': ua };
+}
 function parseBool(value: string | undefined): boolean | undefined {
   if (value === undefined || value === null) return undefined;
   const lower = value.toLowerCase();

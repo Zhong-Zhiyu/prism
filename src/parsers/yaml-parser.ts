@@ -109,9 +109,19 @@ function parseProxyBrace(raw: string): ProxyNode | null {
  */
 function findMatchingBrace(str: string, start: number): number {
   let depth = 0;
+  let inStr: string | null = null;
   for (let i = start; i < str.length; i++) {
-    if (str[i] === '{') depth++;
-    else if (str[i] === '}') {
+    const ch = str[i];
+    if (inStr) {
+      if (ch === inStr && str[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
       depth--;
       if (depth === 0) return i;
     }
@@ -188,7 +198,7 @@ function extractProxyGroups(lines: string[]): ProxyGroup[] {
     if (currentGroup) {
       const colonIdx = trimmed.indexOf(':');
       if (colonIdx > 0) {
-        const key = trimmed.substring(0, colonIdx).trim();
+        const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
         const value = trimmed.substring(colonIdx + 1).trim();
 
         if (key === 'type') {
@@ -267,10 +277,10 @@ function extractTopLevelFields(lines: string[], config: ClashConfig): void {
       continue;
     }
 
-    const colonIdx = trimmed.indexOf(':');
+    const colonIdx = findFlowMappingColon(trimmed);
     if (colonIdx <= 0) continue;
 
-    const key = trimmed.substring(0, colonIdx).trim();
+    const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
     const rawVal = trimmed.substring(colonIdx + 1).trim();
 
     // 处理嵌套块：任意顶级键无内联值时，收集子块解析
@@ -365,13 +375,13 @@ function parseNestedDict(lines: string[]): unknown {
       continue;
     }
 
-    const colonIdx = trimmed.indexOf(':');
+    const colonIdx = findFlowMappingColon(trimmed);
     if (colonIdx <= 0) {
       i++;
       continue;
     }
 
-    const key = trimmed.substring(0, colonIdx).trim();
+    const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
     const rawVal = trimmed.substring(colonIdx + 1).trim();
 
     if (rawVal) {
@@ -433,14 +443,17 @@ function parseProxyBraceEntry(raw: string): ProxyNode | null {
 }
 
 function parseProxiesList(content: string): string[] {
-  return content.split(',').map(s => extractYamlValue(s.trim())).filter(Boolean);
+  return splitYamlFlow(content).map(s => extractYamlValue(s.trim())).filter(Boolean);
 }
 
 function extractYamlValue(raw: string): string {
   let s = raw.trim();
-  // 去掉引号
-  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
-    s = s.slice(1, -1);
+  // 去掉引号并还原引号内的转义
+  if (s.startsWith("'") && s.endsWith("'") && s.length >= 2) {
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
   }
   return s;
 }
@@ -474,7 +487,7 @@ function parseYamlFlow(raw: string): unknown {
       const obj: Record<string, unknown> = {};
       const pairs = splitYamlFlow(inner);
       for (const pair of pairs) {
-        const colonIdx = pair.indexOf(':');
+        const colonIdx = findFlowMappingColon(pair);
         if (colonIdx <= 0) continue;
         const k = extractYamlValue(pair.substring(0, colonIdx).trim());
         const v = parseYamlFlow(extractYamlValue(pair.substring(colonIdx + 1).trim()));
@@ -540,6 +553,27 @@ function splitYamlFlow(content: string): string[] {
   return result;
 }
 
+/**
+ * 在流式键值对中查找键与值之间的冒号位置。
+ * 必须忽略引号内的冒号（如 'geosite:cn,apple,private'），否则会切断键名。
+ */
+function findFlowMappingColon(pair: string): number {
+  let inStr: string | null = null;
+  for (let i = 0; i < pair.length; i++) {
+    const ch = pair[i];
+    if (inStr) {
+      if (ch === inStr && pair[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      continue;
+    }
+    if (ch === ':') return i;
+  }
+  return -1;
+}
+
 function simpleJsonify(str: string): string {
   str = str.replace(/,\s*([}\]])/g, '$1');
   str = str.replace(/(\{|\,)\s*([a-zA-Z_][\w-]*)\s*:/g, '$1"$2":');
@@ -561,25 +595,17 @@ function manualExtractProxy(str: string): ProxyNode | null {
     const key = pair.substring(0, colonIdx).trim().replace(/^['"]|['"]$/g, '');
     let value: unknown = pair.substring(colonIdx + 1).trim();
 
-    // 去掉引号包裹
-    const maybeQuoted = value as string;
-    if ((maybeQuoted.startsWith("'") && maybeQuoted.endsWith("'")) ||
-        (maybeQuoted.startsWith('"') && maybeQuoted.endsWith('"'))) {
-      value = maybeQuoted.slice(1, -1);
-    }
+    // 去掉引号包裹并还原转义
+    value = extractYamlValue(value as string);
 
     // 尝试解析 YAML 内联数组（如 alpn: [h2, http/1.1] 或 alpn: ["h2", "http/1.1"]）
     if (typeof value === 'string' && value.startsWith('[') && value.endsWith(']')) {
       const inner = value.slice(1, -1).trim();
       if (inner) {
-        // 按逗号分割，去除引号
-        value = inner.split(',').map((s: string) => {
-          let t = s.trim();
-          if ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"'))) {
-            t = t.slice(1, -1);
-          }
-          return t;
-        }).filter((s: string) => s.length > 0);
+        // 按逗号分割，去除引号（尊重引号内的逗号）
+        value = splitYamlFlow(inner)
+          .map((s: string) => extractYamlValue(s.trim()))
+          .filter((s: string) => s.length > 0);
       } else {
         value = [];
       }
@@ -595,11 +621,8 @@ function manualExtractProxy(str: string): ProxyNode | null {
           const scIdx = sp.indexOf(':');
           if (scIdx === -1) continue;
           const sk = sp.substring(0, scIdx).trim().replace(/^['"]|['"]$/g, '');
-          let sv: unknown = sp.substring(scIdx + 1).trim();
+          let sv: unknown = extractYamlValue(sp.substring(scIdx + 1).trim());
           if (typeof sv === 'string') {
-            if ((sv.startsWith("'") && sv.endsWith("'")) || (sv.startsWith('"') && sv.endsWith('"'))) {
-              sv = sv.slice(1, -1);
-            }
             if (sv === 'true') sv = true;
             else if (sv === 'false') sv = false;
             else if (typeof sv === 'string' && /^\d+$/.test(sv)) sv = parseInt(sv, 10);
@@ -639,10 +662,8 @@ function parseInlineProxyGroup(inline: string): ProxyGroup | null {
     const key = pair.substring(0, colonIdx).trim().replace(/^['"]|['"]$/g, '');
     let value = pair.substring(colonIdx + 1).trim();
 
-    // 去掉外层引号
-    if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
-      value = value.slice(1, -1);
-    }
+    // 去掉外层引号并还原转义
+    value = extractYamlValue(value);
 
     if (key === 'name') {
       group.name = value;
@@ -652,13 +673,9 @@ function parseInlineProxyGroup(inline: string): ProxyGroup | null {
       // 解析 proxies 数组，元素可能是带或不带引号的中文/英文名
       const inner = value.slice(1, -1).trim();
       if (inner) {
-        group.proxies = inner.split(',').map((s: string) => {
-          let t = s.trim();
-          if ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"'))) {
-            t = t.slice(1, -1);
-          }
-          return t;
-        }).filter((s: string) => s.length > 0);
+        group.proxies = splitYamlFlow(inner)
+          .map((s: string) => extractYamlValue(s.trim()))
+          .filter((s: string) => s.length > 0);
       }
     } else if (key === 'url') {
       group.url = value;
@@ -678,9 +695,24 @@ function parseInlineProxyGroup(inline: string): ProxyGroup | null {
 function splitTopLevel(content: string): string[] {
   const result: string[] = [];
   let depth = 0;
+  let inStr: string | null = null;
   let current = '';
 
-  for (const ch of content) {
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+
+    if (inStr) {
+      current += ch;
+      if (ch === inStr && content[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      current += ch;
+      continue;
+    }
+
     if (ch === '{' || ch === '[') depth++;
     else if (ch === '}' || ch === ']') depth--;
 

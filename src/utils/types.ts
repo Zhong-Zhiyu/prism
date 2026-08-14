@@ -109,6 +109,7 @@ export interface ConversionParams {
   scv?: boolean;
   expand?: boolean;
   tls13?: boolean;
+  ua?: string;
 }
 
 /** 转换后的输出内容 */
