@@ -5,6 +5,7 @@
 
 import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams } from '../utils/types';
 import { expandPlaceholderProxies } from '../parsers/ini-parser';
+import { mapNodeReference, parseClashRule, prepareNodes } from '../utils/node-utils';
 
 /**
  * sing-box outbound 类型映射
@@ -42,14 +43,16 @@ export function generateSingboxConfig(
     {
       type: 'mixed',
       tag: 'mixed-in',
-      listen: '::',
+      listen: '127.0.0.1',
       listen_port: inPort,
     },
   ];
 
   // ---- Outbounds ----
-  const allNodes = applySingboxNodeFilters(sourceConfig.proxies, params);
-  const allNodeNames = allNodes.map(n => n.name);
+  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const allNodes = prepared.nodes;
+  const allNodeNames = prepared.allNames;
+  const nodeNameMap = prepared.displayNames;
   
   const outbounds: unknown[] = [];
   
@@ -77,7 +80,9 @@ export function generateSingboxConfig(
 
     // 生成 selector/urltest 出站组
     for (const group of expandedGroups) {
-      const members = group.proxies.filter(p => allNodeNames.includes(p) || ['DIRECT', 'REJECT'].includes(p));
+      const members = group.proxies
+        .filter(p => allNodeNames.includes(p) || nodeNameMap.has(p) || ['DIRECT', 'REJECT'].includes(p))
+        .map(p => mapNodeReference(p, nodeNameMap));
       if (members.length === 0) continue;
       const tag = group.name;
       if (group.groupType === 'url-test') {
@@ -122,9 +127,9 @@ export function generateSingboxConfig(
     for (const rule of sourceConfig.rules || []) {
       const singboxRule = convertRuleToSingbox(rule);
       if (singboxRule) {
-        const parts = rule.split(',');
-        const target = parts.length >= 2 ? parts[parts.length - 1].trim() : 'DIRECT';
-        rules.push({ ...singboxRule, outbound: target });
+        const parsedRule = parseClashRule(rule);
+        const target = parsedRule?.target || 'DIRECT';
+        rules.push({ ...singboxRule, outbound: mapNodeReference(target, nodeNameMap) });
       }
     }
   }
@@ -143,13 +148,7 @@ function convertNodeToSingboxOutbound(node: ProxyNode, params: ConversionParams)
   const singboxType = SINGBOX_TYPE_MAP[node.type];
   if (!singboxType) return null;
 
-  let displayName = node.name;
-  if (params.emoji === false) {
-    displayName = displayName.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').trim();
-  }
-  if (params.append_type) {
-    displayName = `[${node.type.toUpperCase()}] ${displayName}`;
-  }
+  const displayName = node.name;
 
   const outbound: Record<string, unknown> = {
     type: singboxType,
@@ -218,11 +217,11 @@ function applySingboxNodeFilters(nodes: ProxyNode[], params: ConversionParams): 
  * 转换 Clash 规则为 sing-box 规则
  */
 function convertRuleToSingbox(rule: string): Record<string, unknown> | null {
-  const parts = rule.split(',');
-  if (parts.length < 2) return null;
+  const parsed = parseClashRule(rule);
+  if (!parsed) return null;
 
-  const ruleType = parts[0].trim();
-  const value = parts.slice(1).join(',').trim();
+  const ruleType = parsed.type;
+  const value = parsed.value;
 
   switch (ruleType) {
     case 'DOMAIN-SUFFIX':

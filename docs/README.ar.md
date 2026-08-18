@@ -41,7 +41,7 @@ npm install
 npx vercel deploy --prod
 ```
 
-لا حاجة لخطوة بناء — `api/index.js` المُبنى مسبقًا مضمن في المستودع.
+يشغّل Vercel الأمر `npm run build:vercel` أثناء النشر لبناء `api/index.js`؛ ويمكنك تشغيل الأمر نفسه محليًا للتحقق من عملية البناء.
 
 ## التطوير المحلي
 

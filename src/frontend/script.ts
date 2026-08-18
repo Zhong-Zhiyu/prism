@@ -140,6 +140,7 @@ export const SCRIPT = `<script>
       options.forEach(function(o) { o.classList.remove('highlighted'); });
       if (optionEl) {
         optionEl.classList.add('highlighted');
+        trigger.setAttribute('aria-activedescendant', optionEl.id || '');
         optionEl.scrollIntoView({ block: 'nearest' });
       }
     }
@@ -476,6 +477,8 @@ function doApplyLanguage(lang, newDir) {
   document.documentElement.lang = lang;
   document.documentElement.dir = newDir;
   document.title = I18N[lang].title;
+  var langSelect = document.querySelector('#lang-select-wrapper select');
+  if (langSelect) langSelect.value = lang;
 
   [].forEach.call(document.querySelectorAll('[data-i18n]'), function(el) {
     var k = el.getAttribute('data-i18n');
@@ -510,6 +513,12 @@ function doApplyLanguage(lang, newDir) {
     });
     if (w.id === 'lang-select-wrapper' && tt) {
       tt.textContent = {'zh-Hans':'简体中文','zh-Hant':'繁體中文','en':'English','ja':'日本語','ko':'한국어','ru':'Русский','vi':'Tiếng Việt','ar':'العربية','fa':'فارسی'}[lang] || '简体中文';
+      [].forEach.call(w.querySelectorAll('.custom-select-option'), function(option) {
+        var selected = option.getAttribute('data-value') === lang;
+        option.classList.toggle('selected', selected);
+        option.setAttribute('aria-selected', String(selected));
+        if (selected) w.querySelector('.custom-select-trigger').setAttribute('aria-activedescendant', option.id || '');
+      });
     }
   });
 
@@ -616,35 +625,68 @@ function applyLanguage(lang) {
 
 currentLang = detectLanguage();
 applyLanguage(currentLang);
+setMode('basic');
+onConfigChange();
 
 // ========== 现有业务函数 ==========
 function onConfigChange() {
   var val = document.getElementById('config-select').value;
-  document.getElementById('config-custom-group').classList.toggle('show', val === '__custom__');
+  var group = document.getElementById('config-custom-group');
+  var visible = val === '__custom__';
+  group.classList.toggle('show', visible);
+  group.setAttribute('aria-hidden', String(!visible));
+  [].forEach.call(group.querySelectorAll('input, select, textarea, button'), function(el) { el.disabled = !visible; });
 }
 
 function setMode(mode) {
-  document.getElementById('advanced').classList.toggle('show', mode === 'advanced');
-  document.getElementById('mode-toggle').classList.toggle('advanced', mode === 'advanced');
-  document.getElementById('mode-basic').classList.toggle('active', mode === 'basic');
-  document.getElementById('mode-advanced').classList.toggle('active', mode === 'advanced');
+  var advanced = document.getElementById('advanced');
+  var isAdvanced = mode === 'advanced';
+  advanced.classList.toggle('show', isAdvanced);
+  advanced.setAttribute('aria-hidden', String(!isAdvanced));
+  [].forEach.call(advanced.querySelectorAll('input, select, textarea, button'), function(el) { el.disabled = !isAdvanced; });
+  document.getElementById('mode-toggle').classList.toggle('advanced', isAdvanced);
+  document.getElementById('mode-basic').classList.toggle('active', !isAdvanced);
+  document.getElementById('mode-advanced').classList.toggle('active', isAdvanced);
 }
 
 function generateSubscription() {
   var urlEls = document.querySelectorAll('.url-input');
   var urls = [];
+  var invalid = false;
   urlEls.forEach(function(el) {
     var v = el.value.trim();
-    if (v) urls.push(v);
+    if (!v) return;
+    try {
+      var parsed = new URL(v);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') invalid = true;
+    } catch (e) { invalid = true; }
+    urls.push(v);
   });
   if (urls.length === 0) {
+    clearResult();
+    showResult('msgEnterUrl');
+    return;
+  }
+  if (invalid || urls.length > 5) {
+    clearResult();
+    showResult('msgEnterUrl');
+    return;
+  }
+
+  var includeValue = document.getElementById('include').value.trim();
+  var excludeValue = document.getElementById('exclude').value.trim();
+  try {
+    if (includeValue) new RegExp(includeValue);
+    if (excludeValue) new RegExp(excludeValue);
+  } catch (e) {
+    clearResult();
     showResult('msgEnterUrl');
     return;
   }
 
   var params = new URLSearchParams();
   params.set('target', document.getElementById('target').value);
-  params.set('url', urls.join('|'));
+  urls.forEach(function(url) { params.append('url', url); });
 
   var configVal = document.getElementById('config-select').value.trim();
   if (configVal === '__custom__') {
@@ -678,8 +720,12 @@ function generateSubscription() {
 
   var apiUrl = window.location.origin + '/sub?' + params.toString();
 
+  generatedTarget = document.getElementById('target').value;
+  generatedFilename = filename;
   document.getElementById('result-url').value = apiUrl;
   document.getElementById('result-section').style.display = 'block';
+  document.getElementById('btn-copy').disabled = false;
+  document.getElementById('btn-download').disabled = false;
   setStatus('msgGenerated');
 }
 
@@ -687,7 +733,8 @@ function addUrlRow() {
   var container = document.getElementById('url-rows');
   var row = document.createElement('div');
   row.className = 'url-row';
-  row.innerHTML = '<input type="url" class="url-input" required><button class="url-row-del" onclick="removeUrlRow(this)" title="删除">×</button>';
+  var index = document.querySelectorAll('.url-row').length;
+  row.innerHTML = '<input type="url" id="url-' + index + '" class="url-input" required autocomplete="url"><button class="url-row-del" onclick="removeUrlRow(this)" title="删除" aria-label="删除订阅链接">×</button>';
   container.appendChild(row);
   updateUrlDelButtons();
 }
@@ -712,6 +759,13 @@ function setStatus(key) {
   el.textContent = t(key);
   el.setAttribute('data-i18n-status', key);
 }
+function clearResult() {
+  document.getElementById('result-url').value = '';
+  document.getElementById('btn-copy').disabled = true;
+  document.getElementById('btn-download').disabled = true;
+  generatedTarget = null;
+  generatedFilename = null;
+}
 function showResult(key) {
   setStatus(key);
   document.getElementById('result-section').style.display = 'block';
@@ -719,33 +773,43 @@ function showResult(key) {
 
 function copyUrl() {
   var el = document.getElementById('result-url');
+  if (!el.value) return;
   el.select();
   if (navigator.clipboard) {
     navigator.clipboard.writeText(el.value).then(function() {
       setStatus('msgCopied');
+    }).catch(function() {
+      setStatus('msgDownloadFailed');
     });
   } else {
-    document.execCommand('copy');
-    setStatus('msgCopied');
+    try {
+      document.execCommand('copy');
+      setStatus('msgCopied');
+    } catch (e) {
+      setStatus('msgDownloadFailed');
+    }
   }
 }
 
+var generatedTarget = null;
+var generatedFilename = null;
+
 async function downloadConfig() {
   var apiUrl = document.getElementById('result-url').value;
-  var target = document.getElementById('target').value;
+  if (!apiUrl) { setStatus('msgDownloadFailed'); return; }
   var extMap = { clash: '.yaml', singbox: '.json', surge: '.conf' };
-  var ext = extMap[target] || '.yaml';
-  var name = document.getElementById('filename').value.trim();
-  if (!name) name = 'Prism';
-  name = name.replace(/\\\\.(yaml|json|conf)$/i, '') + ext;
+  var ext = extMap[generatedTarget || document.getElementById('target').value] || '.yaml';
+  var name = generatedFilename || document.getElementById('filename').value.trim() || 'Prism';
+  name = name.replace(/\.(yaml|json|conf)$/i, '') + ext;
   try {
-    var resp = await fetch(apiUrl);
+    var resp = await fetch(apiUrl, { referrerPolicy: 'no-referrer' });
+    if (!resp.ok) throw new Error('download failed');
     var blob = await resp.blob();
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 0);
     setStatus('msgDownloadStarted');
   } catch(e) {
     setStatus('msgDownloadFailed');

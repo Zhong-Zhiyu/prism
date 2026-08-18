@@ -41,7 +41,7 @@ npm install
 npx vercel deploy --prod
 ```
 
-빌드 단계가 필요 없습니다——사전 빌드된 `api/index.js`가 저장소에 포함되어 있습니다.
+Vercel은 배포 중 `npm run build:vercel`을 실행하여 `api/index.js`를 빌드합니다. 로컬에서도 같은 명령을 실행해 빌드를 확인할 수 있습니다.
 
 ## 로컬 개발
 

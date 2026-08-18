@@ -13,20 +13,20 @@ export const BODY = `<body>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       </a>
       <div class="custom-select" id="lang-select-wrapper" style="width:auto">
-        <div class="custom-select-trigger lang-trigger" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+        <div class="custom-select-trigger lang-trigger" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-controls="lang-select-listbox" aria-activedescendant="lang-option-zh-Hans">
           <span class="custom-select-trigger-text">简体中文</span>
           <svg class="custom-select-arrow" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <div class="custom-select-dropdown" role="listbox">
-          <div class="custom-select-option selected" data-value="zh-Hans" role="option">简体中文</div>
-          <div class="custom-select-option" data-value="zh-Hant" role="option">繁體中文</div>
-          <div class="custom-select-option" data-value="en" role="option">English</div>
-          <div class="custom-select-option" data-value="ja" role="option">日本語</div>
-          <div class="custom-select-option" data-value="ko" role="option">한국어</div>
-          <div class="custom-select-option" data-value="ru" role="option">Русский</div>
-          <div class="custom-select-option" data-value="vi" role="option">Tiếng Việt</div>
-          <div class="custom-select-option" data-value="ar" role="option">العربية</div>
-          <div class="custom-select-option" data-value="fa" role="option">فارسی</div>
+        <div class="custom-select-dropdown" id="lang-select-listbox" role="listbox">
+          <div class="custom-select-option selected" id="lang-option-zh-Hans" data-value="zh-Hans" role="option" aria-selected="true">简体中文</div>
+          <div class="custom-select-option" id="lang-option-zh-Hant" data-value="zh-Hant" role="option" aria-selected="false">繁體中文</div>
+          <div class="custom-select-option" id="lang-option-en" data-value="en" role="option" aria-selected="false">English</div>
+          <div class="custom-select-option" id="lang-option-ja" data-value="ja" role="option" aria-selected="false">日本語</div>
+          <div class="custom-select-option" id="lang-option-ko" data-value="ko" role="option" aria-selected="false">한국어</div>
+          <div class="custom-select-option" id="lang-option-ru" data-value="ru" role="option" aria-selected="false">Русский</div>
+          <div class="custom-select-option" id="lang-option-vi" data-value="vi" role="option" aria-selected="false">Tiếng Việt</div>
+          <div class="custom-select-option" id="lang-option-ar" data-value="ar" role="option" aria-selected="false">العربية</div>
+          <div class="custom-select-option" id="lang-option-fa" data-value="fa" role="option" aria-selected="false">فارسی</div>
         </div>
         <select onchange="applyLanguage(this.value)" style="display:none">
           <option value="zh-Hans">简体中文</option>
@@ -51,11 +51,11 @@ export const BODY = `<body>
     </div>
 
     <div class="form-group">
-      <label data-i18n="labelUrl">原始订阅链接</label>
+      <label for="url-0" data-i18n="labelUrl">原始订阅链接</label>
       <div id="url-rows">
         <div class="url-row">
-          <input type="url" class="url-input" required>
-          <button class="url-row-del" onclick="removeUrlRow(this)" title="删除" style="display:none">×</button>
+          <input type="url" id="url-0" class="url-input" required autocomplete="url">
+          <button class="url-row-del" onclick="removeUrlRow(this)" title="删除" aria-label="删除订阅链接" style="display:none">×</button>
         </div>
       </div>
       <button class="btn-add-url" onclick="addUrlRow()" data-i18n="btnAddUrl">添加订阅链接</button>
@@ -148,10 +148,10 @@ export const BODY = `<body>
       <label style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;display:block;" data-i18n="labelResult">生成的订阅链接：</label>
       <textarea class="result-url" id="result-url" readonly rows="3"></textarea>
       <div class="result-actions">
-        <button class="btn-sm" onclick="copyUrl()" data-i18n="btnCopy">复制链接</button>
-        <button class="btn-sm download" id="btn-download" onclick="downloadConfig()" data-i18n="btnDownload">下载配置</button>
+        <button class="btn-sm" id="btn-copy" onclick="copyUrl()" data-i18n="btnCopy" disabled>复制链接</button>
+        <button class="btn-sm download" id="btn-download" onclick="downloadConfig()" data-i18n="btnDownload" disabled>下载配置</button>
       </div>
-      <div class="status" id="status"></div>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
     </div>
   </div>
 </div>

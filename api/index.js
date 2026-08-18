@@ -2245,564 +2245,79 @@ var init_dist = __esm({
 });
 
 // src/parsers/yaml-parser.ts
+import yaml from "js-yaml";
 function parseClashYaml(content) {
-  const result = {};
-  const lines = content.split("\n");
-  extractTopLevelFields(lines, result);
-  result.proxies = extractProxies(lines);
-  result["proxy-groups"] = extractProxyGroups(lines);
-  result.rules = extractRules(lines);
+  if (content.length > 2 * 1024 * 1024) {
+    throw new Error("\u8BA2\u9605\u914D\u7F6E\u8FC7\u5927");
+  }
+  let parsed;
+  try {
+    parsed = yaml.load(content, { json: false });
+  } catch {
+    throw new Error("\u8BA2\u9605\u4E0D\u662F\u6709\u6548\u7684 YAML \u914D\u7F6E");
+  }
+  if (!isRecord(parsed)) {
+    throw new Error("\u8BA2\u9605\u914D\u7F6E\u5FC5\u987B\u662F YAML \u5BF9\u8C61");
+  }
+  const proxies = parseProxies(parsed.proxies);
+  if (proxies.length === 0) {
+    throw new Error("\u8BA2\u9605\u4E2D\u672A\u627E\u5230\u6709\u6548\u4EE3\u7406\u8282\u70B9");
+  }
+  const result = { ...parsed, proxies };
+  if (parsed["proxy-groups"] !== void 0) {
+    result["proxy-groups"] = parseProxyGroups(parsed["proxy-groups"]);
+  }
+  if (parsed.rules !== void 0) {
+    if (!Array.isArray(parsed.rules) || !parsed.rules.every((value) => typeof value === "string")) {
+      throw new Error("\u8BA2\u9605 rules \u5B57\u6BB5\u683C\u5F0F\u65E0\u6548");
+    }
+    result.rules = parsed.rules;
+  }
   return result;
 }
-function extractProxies(lines) {
+function parseProxies(value) {
+  if (!Array.isArray(value)) return [];
   const proxies = [];
-  let inProxies = false;
-  let braceBuf = "";
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!inProxies && (trimmed === "proxies:" || trimmed.startsWith("proxies:"))) {
-      inProxies = true;
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const name = item.name;
+    const type = item.type;
+    const server = item.server;
+    const port = item.port;
+    if (typeof name !== "string" || !name.trim() || typeof type !== "string" || !SUPPORTED_PROXY_TYPES.has(type.toLowerCase()) || typeof server !== "string" || !server.trim() || !Number.isInteger(port) || port < 1 || port > 65535) {
       continue;
     }
-    if (!inProxies) continue;
-    if (trimmed.match(/^[a-z][\w-]*\s*:/) && !trimmed.startsWith("-") && !trimmed.startsWith(" ")) {
-      if (braceBuf.trim()) {
-        const node = parseProxyBrace(braceBuf);
-        if (node) proxies.push(node);
-      }
-      break;
-    }
-    if (trimmed.startsWith("-")) {
-      if (braceBuf.trim()) {
-        const node = parseProxyBrace(braceBuf);
-        if (node) proxies.push(node);
-        braceBuf = "";
-      }
-      braceBuf = trimmed.substring(1).trim();
-    } else if (trimmed && inProxies) {
-      braceBuf += " " + trimmed;
-    } else if (!trimmed && braceBuf.trim()) {
-      const node = parseProxyBrace(braceBuf);
-      if (node) proxies.push(node);
-      braceBuf = "";
-    }
-  }
-  if (braceBuf.trim()) {
-    const node = parseProxyBrace(braceBuf);
-    if (node) proxies.push(node);
+    proxies.push({ ...item, name, type: type.toLowerCase(), server, port });
   }
   return proxies;
 }
-function parseProxyBrace(raw2) {
-  let working = raw2.trim();
-  if (!working) return null;
-  if (!working.startsWith("{")) working = "{" + working;
-  const closingIdx = findMatchingBrace(working, 0);
-  if (closingIdx > 0) {
-    working = working.substring(0, closingIdx + 1);
-  }
-  try {
-    const jsonSafe = simpleJsonify(working);
-    return JSON.parse(jsonSafe);
-  } catch {
-    return manualExtractProxy(working);
-  }
-}
-function findMatchingBrace(str, start) {
-  let depth = 0;
-  let inStr = null;
-  for (let i = start; i < str.length; i++) {
-    const ch = str[i];
-    if (inStr) {
-      if (ch === inStr && str[i - 1] !== "\\") inStr = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      inStr = ch;
-      continue;
-    }
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-function extractProxyGroups(lines) {
-  const groups = [];
-  let inSection = false;
-  let currentGroup = null;
-  let proxyList = [];
-  let collectingList = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!inSection && (trimmed === "proxy-groups:" || trimmed.startsWith("proxy-groups:"))) {
-      inSection = true;
-      continue;
-    }
-    if (!inSection) continue;
-    if (trimmed.match(/^[a-z][\w-]*\s*:/) && !trimmed.startsWith(" ") && !trimmed.startsWith("-")) {
-      if (currentGroup) {
-        groups.push({ ...currentGroup, proxies: proxyList });
-      }
-      break;
-    }
-    if (trimmed.startsWith("- name:")) {
-      if (currentGroup) {
-        groups.push({ ...currentGroup, proxies: proxyList });
-      }
-      currentGroup = {
-        name: extractYamlValue(trimmed.substring("- name:".length)),
-        type: "select",
-        proxies: []
-      };
-      proxyList = [];
-      collectingList = false;
-      continue;
-    }
-    if (trimmed.startsWith("- {")) {
-      if (currentGroup) {
-        groups.push({ ...currentGroup, proxies: proxyList });
-        currentGroup = null;
-        proxyList = [];
-        collectingList = false;
-      }
-      const braceStr = trimmed.substring(2);
-      const closingIdx = findMatchingBrace(braceStr, 0);
-      const inline = closingIdx > 0 ? braceStr.substring(0, closingIdx + 1) : braceStr;
-      try {
-        const g = JSON.parse(simpleJsonify(inline));
-        if (g.name) groups.push(g);
-      } catch {
-        const parsed = parseInlineProxyGroup(inline);
-        if (parsed) groups.push(parsed);
-      }
-      continue;
-    }
-    if (currentGroup) {
-      const colonIdx = trimmed.indexOf(":");
-      if (colonIdx > 0) {
-        const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
-        const value = trimmed.substring(colonIdx + 1).trim();
-        if (key === "type") {
-          currentGroup.type = value;
-          collectingList = false;
-        } else if (key === "proxies") {
-          if (value.startsWith("[") && value.endsWith("]")) {
-            proxyList = parseProxiesList(value.slice(1, -1));
-            collectingList = false;
-          } else if (!value) {
-            collectingList = true;
-          }
-        } else if (key === "url") {
-          currentGroup.url = extractYamlValue(value);
-        } else if (key === "interval") {
-          currentGroup.interval = parseInt(value, 10);
-        } else if (key === "tolerance") {
-          currentGroup.tolerance = parseInt(value, 10);
-        } else if (key === "lazy") {
-          currentGroup.lazy = value === "true";
-        }
-      } else if (collectingList && trimmed.startsWith("- ")) {
-        proxyList.push(extractYamlValue(trimmed.substring(2)));
-      }
-    }
-  }
-  if (currentGroup) {
-    groups.push({ ...currentGroup, proxies: proxyList });
-  }
-  return groups;
-}
-function extractRules(lines) {
-  const rules = [];
-  let inSection = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!inSection && (trimmed === "rules:" || trimmed.startsWith("rules:"))) {
-      inSection = true;
-      continue;
-    }
-    if (!inSection) continue;
-    if (trimmed.match(/^[a-z][\w-]*\s*:/) && !trimmed.startsWith(" ") && !trimmed.startsWith("-")) {
-      break;
-    }
-    if (trimmed.startsWith("- ")) {
-      rules.push(trimmed.substring(2).trim());
-    } else if (trimmed.startsWith("-")) {
-      rules.push(trimmed.substring(1).trim());
-    }
-  }
-  return rules;
-}
-function extractTopLevelFields(lines, config) {
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("proxies:") || trimmed.startsWith("proxy-groups:") || trimmed.startsWith("rules:") || trimmed.startsWith("-") || line.startsWith(" ")) {
-      continue;
-    }
-    const colonIdx = findFlowMappingColon(trimmed);
-    if (colonIdx <= 0) continue;
-    const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
-    const rawVal = trimmed.substring(colonIdx + 1).trim();
-    if (!rawVal || rawVal === "{}") {
-      const blockLines = [];
-      const baseIndent = line.length - line.trimStart().length + 2;
-      let j = i + 1;
-      while (j < lines.length) {
-        const nextLine = lines[j];
-        const nextIndent = nextLine.length - nextLine.trimStart().length;
-        if (nextIndent < baseIndent && nextLine.trim() !== "") break;
-        if (nextIndent >= baseIndent || nextLine.trim() === "") {
-          blockLines.push(nextLine);
-        }
-        j++;
-      }
-      if (key === "hosts") {
-        config.hosts = parseNestedDict(blockLines);
-      } else if (key === "dns") {
-        config.dns = parseNestedDict(blockLines);
-      } else {
-        config[key] = parseNestedDict(blockLines);
-      }
-      continue;
-    }
-    if (!rawVal && line.endsWith(":")) continue;
-    const value = extractYamlValue(rawVal);
-    if (key === "port" || key === "socks-port" || key === "mixed-port" || key === "redir-port" || key === "tproxy-port" || key === "keep-alive-interval") {
-      config[key] = parseInt(value, 10) || Number(value);
-    } else if (value === "true") {
-      config[key] = true;
-    } else if (value === "false") {
-      config[key] = false;
-    } else if (value === "null" || value === "~") {
-      config[key] = null;
-    } else {
-      config[key] = value;
-    }
-  }
-}
-function parseNestedDict(lines) {
-  let baseIndent = Infinity;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const indent = line.length - line.trimStart().length;
-    if (indent < baseIndent) baseIndent = indent;
-  }
-  if (!isFinite(baseIndent)) baseIndent = 0;
-  const firstLine = lines.find((l) => {
-    const t = l.trim();
-    return t && !t.startsWith("#");
+function parseProxyGroups(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).flatMap((item) => {
+    if (typeof item.name !== "string" || !item.name.trim() || typeof item.type !== "string") return [];
+    const proxies = Array.isArray(item.proxies) ? item.proxies.filter((proxy) => typeof proxy === "string") : [];
+    return [{ ...item, name: item.name, type: item.type, proxies }];
   });
-  if (firstLine && firstLine.trim().startsWith("- ")) {
-    const items = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      if (trimmed.startsWith("- ")) {
-        const itemVal = extractYamlValue(trimmed.substring(2).trim());
-        items.push(parseYamlFlow(itemVal));
-      }
-    }
-    return items;
-  }
-  const result = {};
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    const indent = line.length - line.trimStart().length;
-    if (!trimmed || trimmed.startsWith("#") || indent !== baseIndent) {
-      i++;
-      continue;
-    }
-    const colonIdx = findFlowMappingColon(trimmed);
-    if (colonIdx <= 0) {
-      i++;
-      continue;
-    }
-    const key = extractYamlValue(trimmed.substring(0, colonIdx).trim());
-    const rawVal = trimmed.substring(colonIdx + 1).trim();
-    if (rawVal) {
-      const extracted = extractYamlValue(rawVal);
-      result[key] = parseYamlFlow(extracted);
-      i++;
-    } else {
-      const subLines = [];
-      let j = i + 1;
-      while (j < lines.length) {
-        const nextLine = lines[j];
-        const nextTrimmed = nextLine.trim();
-        const nextIndent = nextLine.length - nextLine.trimStart().length;
-        if (!nextTrimmed || nextTrimmed.startsWith("#")) {
-          j++;
-          continue;
-        }
-        if (nextIndent <= baseIndent) break;
-        subLines.push(nextLine);
-        j++;
-      }
-      if (subLines.length > 0) {
-        const firstSub = subLines[0].trim();
-        if (firstSub.startsWith("- ")) {
-          const items = [];
-          for (const sl of subLines) {
-            const st = sl.trim();
-            if (st.startsWith("- ")) {
-              const itemVal = extractYamlValue(st.substring(2).trim());
-              items.push(parseYamlFlow(itemVal));
-            }
-          }
-          result[key] = items;
-        } else {
-          result[key] = parseNestedDict(subLines);
-        }
-      } else {
-        result[key] = "";
-      }
-      i = j;
-    }
-  }
-  return result;
 }
-function parseProxiesList(content) {
-  return splitYamlFlow(content).map((s) => extractYamlValue(s.trim())).filter(Boolean);
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function extractYamlValue(raw2) {
-  let s = raw2.trim();
-  if (s.startsWith("'") && s.endsWith("'") && s.length >= 2) {
-    return s.slice(1, -1).replace(/''/g, "'");
-  }
-  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
-    return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-  }
-  return s;
-}
-function parseYamlFlow(raw2) {
-  const s = raw2.trim();
-  if (s.startsWith("[") && s.endsWith("]")) {
-    const inner = s.slice(1, -1).trim();
-    if (!inner) return [];
-    return splitYamlFlow(inner).map((item) => {
-      const v = extractYamlValue(item.trim());
-      return parseYamlFlow(v);
-    });
-  }
-  if (s.startsWith("{") && s.endsWith("}")) {
-    const inner = s.slice(1, -1).trim();
-    if (!inner) return {};
-    try {
-      const jsonSafe = simpleJsonify(`{${inner}}`);
-      return JSON.parse(jsonSafe);
-    } catch {
-      const obj = {};
-      const pairs = splitYamlFlow(inner);
-      for (const pair of pairs) {
-        const colonIdx = findFlowMappingColon(pair);
-        if (colonIdx <= 0) continue;
-        const k = extractYamlValue(pair.substring(0, colonIdx).trim());
-        const v = parseYamlFlow(extractYamlValue(pair.substring(colonIdx + 1).trim()));
-        obj[k] = v;
-      }
-      return obj;
-    }
-  }
-  return coerceScalar(s);
-}
-function coerceScalar(s) {
-  if (s === "true") return true;
-  if (s === "false") return false;
-  if (s === "null" || s === "~") return null;
-  if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
-  return s;
-}
-function splitYamlFlow(content) {
-  const result = [];
-  let depth = 0;
-  let bracket = 0;
-  let inStr = null;
-  let current = "";
-  for (let i = 0; i < content.length; i++) {
-    const ch = content[i];
-    if (inStr) {
-      current += ch;
-      if (ch === inStr && content[i - 1] !== "\\") inStr = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      inStr = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === "{") {
-      depth++;
-      current += ch;
-      continue;
-    }
-    if (ch === "}") {
-      depth--;
-      current += ch;
-      continue;
-    }
-    if (ch === "[") {
-      bracket++;
-      current += ch;
-      continue;
-    }
-    if (ch === "]") {
-      bracket--;
-      current += ch;
-      continue;
-    }
-    if (ch === "," && depth === 0 && bracket === 0) {
-      result.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  if (current) result.push(current);
-  return result;
-}
-function findFlowMappingColon(pair) {
-  let inStr = null;
-  for (let i = 0; i < pair.length; i++) {
-    const ch = pair[i];
-    if (inStr) {
-      if (ch === inStr && pair[i - 1] !== "\\") inStr = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      inStr = ch;
-      continue;
-    }
-    if (ch === ":") return i;
-  }
-  return -1;
-}
-function simpleJsonify(str) {
-  str = str.replace(/,\s*([}\]])/g, "$1");
-  str = str.replace(/(\{|\,)\s*([a-zA-Z_][\w-]*)\s*:/g, '$1"$2":');
-  str = str.replace(/'([^']*)'/g, '"$1"');
-  return str;
-}
-function manualExtractProxy(str) {
-  const node = {};
-  let content = str.trim();
-  if (content.startsWith("{")) content = content.slice(1);
-  if (content.endsWith("}")) content = content.slice(0, -1);
-  const pairs = splitTopLevel(content);
-  for (const pair of pairs) {
-    const colonIdx = pair.indexOf(":");
-    if (colonIdx === -1) continue;
-    const key = pair.substring(0, colonIdx).trim().replace(/^['"]|['"]$/g, "");
-    let value = pair.substring(colonIdx + 1).trim();
-    value = extractYamlValue(value);
-    if (typeof value === "string" && value.startsWith("[") && value.endsWith("]")) {
-      const inner = value.slice(1, -1).trim();
-      if (inner) {
-        value = splitYamlFlow(inner).map((s) => extractYamlValue(s.trim())).filter((s) => s.length > 0);
-      } else {
-        value = [];
-      }
-    }
-    if (typeof value === "string" && value.startsWith("{") && value.endsWith("}")) {
-      const inner = value.slice(1, -1).trim();
-      if (inner) {
-        const subPairs = splitTopLevel(inner);
-        const subObj = {};
-        for (const sp of subPairs) {
-          const scIdx = sp.indexOf(":");
-          if (scIdx === -1) continue;
-          const sk = sp.substring(0, scIdx).trim().replace(/^['"]|['"]$/g, "");
-          let sv = extractYamlValue(sp.substring(scIdx + 1).trim());
-          if (typeof sv === "string") {
-            if (sv === "true") sv = true;
-            else if (sv === "false") sv = false;
-            else if (typeof sv === "string" && /^\d+$/.test(sv)) sv = parseInt(sv, 10);
-          }
-          subObj[sk] = sv;
-        }
-        value = subObj;
-      } else {
-        value = {};
-      }
-    }
-    if (value === "true") value = true;
-    else if (value === "false") value = false;
-    else if (/^\d+$/.test(value)) value = parseInt(value, 10);
-    node[key] = value;
-  }
-  return node.name ? node : null;
-}
-function parseInlineProxyGroup(inline) {
-  let content = inline.trim();
-  if (content.startsWith("{")) content = content.slice(1);
-  if (content.endsWith("}")) content = content.slice(0, -1);
-  const group = { proxies: [] };
-  const pairs = splitTopLevel(content);
-  for (const pair of pairs) {
-    const colonIdx = pair.indexOf(":");
-    if (colonIdx === -1) continue;
-    const key = pair.substring(0, colonIdx).trim().replace(/^['"]|['"]$/g, "");
-    let value = pair.substring(colonIdx + 1).trim();
-    value = extractYamlValue(value);
-    if (key === "name") {
-      group.name = value;
-    } else if (key === "type") {
-      group.type = value;
-    } else if (key === "proxies" && value.startsWith("[") && value.endsWith("]")) {
-      const inner = value.slice(1, -1).trim();
-      if (inner) {
-        group.proxies = splitYamlFlow(inner).map((s) => extractYamlValue(s.trim())).filter((s) => s.length > 0);
-      }
-    } else if (key === "url") {
-      group.url = value;
-    } else if (key === "interval") {
-      group.interval = parseInt(value, 10) || void 0;
-    } else if (key === "tolerance") {
-      group.tolerance = parseInt(value, 10) || void 0;
-    } else if (key === "lazy") {
-      group.lazy = value === "true";
-    }
-  }
-  if (!group.name) return null;
-  return group;
-}
-function splitTopLevel(content) {
-  const result = [];
-  let depth = 0;
-  let inStr = null;
-  let current = "";
-  for (let i = 0; i < content.length; i++) {
-    const ch = content[i];
-    if (inStr) {
-      current += ch;
-      if (ch === inStr && content[i - 1] !== "\\") inStr = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      inStr = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === "{" || ch === "[") depth++;
-    else if (ch === "}" || ch === "]") depth--;
-    if (ch === "," && depth === 0) {
-      result.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  if (current) result.push(current);
-  return result;
-}
+var SUPPORTED_PROXY_TYPES;
 var init_yaml_parser = __esm({
   "src/parsers/yaml-parser.ts"() {
     "use strict";
+    SUPPORTED_PROXY_TYPES = /* @__PURE__ */ new Set([
+      "ss",
+      "ssr",
+      "vmess",
+      "vless",
+      "trojan",
+      "hysteria2",
+      "http",
+      "socks5",
+      "snell",
+      "tuic"
+    ]);
   }
 });
 
@@ -2963,6 +2478,76 @@ var init_ini_parser = __esm({
   }
 });
 
+// src/utils/node-utils.ts
+function prepareNodes(nodes, params) {
+  let filtered = [...nodes];
+  if (params.include) {
+    const regex = new RegExp(params.include);
+    filtered = filtered.filter((node) => regex.test(node.name));
+  }
+  if (params.exclude) {
+    const regex = new RegExp(params.exclude);
+    filtered = filtered.filter((node) => !regex.test(node.name));
+  }
+  if (params.sort) filtered.sort((a, b) => a.name.localeCompare(b.name));
+  const renameRules = parseRenameRules(params.rename);
+  const displayNames = /* @__PURE__ */ new Map();
+  const renamed = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const original of filtered) {
+    if (seen.has(original.name)) continue;
+    seen.add(original.name);
+    let name = original.name;
+    for (const rule of renameRules) {
+      name = name.replace(rule.pattern, rule.replacement);
+    }
+    const renamedNode = name === original.name ? original : { ...original, name };
+    const displayName = getDisplayName(renamedNode, params);
+    displayNames.set(original.name, displayName);
+    renamed.push({ ...renamedNode, name: displayName });
+  }
+  return { nodes: renamed, displayNames, allNames: [...displayNames.values()] };
+}
+function getDisplayName(node, params) {
+  let name = node.name;
+  if (params.emoji === false) name = name.replace(/[\u{1F000}-\u{1FFFF}]/gu, "").trim();
+  if (params.append_type) name = `[${node.type.toUpperCase()}] ${name}`;
+  return name;
+}
+function mapNodeReference(name, displayNames) {
+  return displayNames.get(name) || name;
+}
+function parseClashRule(rule) {
+  const parts = rule.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const type = parts[0].toUpperCase();
+  const noResolve = parts[parts.length - 1].toLowerCase() === "no-resolve";
+  const body = noResolve ? parts.slice(0, -1) : parts;
+  const hasTarget = body.length >= 3;
+  const target = hasTarget ? body[body.length - 1] : "DIRECT";
+  const valueParts = hasTarget ? body.slice(1, -1) : body.slice(1);
+  return { type, value: valueParts.join(",").trim(), target, noResolve };
+}
+function parseRenameRules(value) {
+  if (!value) return [];
+  const rawRules = value.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean);
+  const rules = rawRules.length > 1 ? rawRules : value.split("|").map((rule) => rule.trim()).filter(Boolean);
+  return rules.flatMap((rule) => {
+    const index = rule.lastIndexOf("@");
+    if (index <= 0) return [];
+    try {
+      return [{ pattern: new RegExp(rule.slice(0, index)), replacement: rule.slice(index + 1) }];
+    } catch {
+      return [];
+    }
+  });
+}
+var init_node_utils = __esm({
+  "src/utils/node-utils.ts"() {
+    "use strict";
+  }
+});
+
 // src/generators/clash.ts
 function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
   const lines = [];
@@ -2970,17 +2555,10 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
   lines.push("# Prism - \u8BA2\u9605\u8F6C\u6362\u5DE5\u5177");
   lines.push("# ====================================");
   lines.push("");
-  let allNodes = applyNodeFilters(sourceConfig.proxies, params);
-  if (params.rename) allNodes = applyRenames(allNodes, params.rename);
-  const seen = /* @__PURE__ */ new Set();
-  allNodes = allNodes.filter((n) => {
-    const k = n.name;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  const allNodeNames = allNodes.map((n) => getNodeDisplayName(n, params));
-  const nodeNameMap = new Map(allNodes.map((n, i) => [n.name, allNodeNames[i]]));
+  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const allNodes = prepared.nodes;
+  const allNodeNames = prepared.allNames;
+  const nodeNameMap = prepared.displayNames;
   const RESERVED_KEYS = /* @__PURE__ */ new Set(["proxies", "proxy-groups", "rules", "dns", "hosts"]);
   for (const [key, value] of Object.entries(sourceConfig)) {
     if (value === void 0 || value === null) continue;
@@ -3036,10 +2614,13 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
       if (iniConfig.rulesetEntries.length > 0) {
         if (params.expand !== false) {
           lines.push("rules:");
+          if (!iniConfig.overwriteOriginalRules && Array.isArray(value)) {
+            for (const rule of value) lines.push(`  - ${formatRule(rule)}`);
+          }
           for (const entry of iniConfig.rulesetEntries) {
             if (entry.isSpecial) {
               if (entry.specialType === "GEOIP") {
-                lines.push(`  - GEOSITE,${entry.specialValue},${entry.groupName}`);
+                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
               } else if (entry.specialType === "FINAL") {
                 lines.push(`  - MATCH,${entry.groupName}`);
               }
@@ -3071,7 +2652,7 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
               lines.push(`  ${pn}:`);
               lines.push(`    type: http`);
               lines.push(`    behavior: domain`);
-              lines.push(`    url: "${entry.url}"`);
+              lines.push(`    url: "${esc(entry.url)}"`);
               lines.push(`    interval: 86400`);
             }
           }
@@ -3079,7 +2660,7 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
           for (const entry of iniConfig.rulesetEntries) {
             if (entry.isSpecial) {
               if (entry.specialType === "GEOIP") {
-                lines.push(`  - GEOSITE,${entry.specialValue},${entry.groupName}`);
+                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
               } else if (entry.specialType === "FINAL") {
                 lines.push(`  - MATCH,${entry.groupName}`);
               }
@@ -3123,13 +2704,8 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
   }
   return lines.join("\n");
 }
-function getNodeDisplayName(node, params) {
-  let name = node.name;
-  if (params.emoji === false) {
-    name = name.replace(/[\u{1F000}-\u{1FFFF}]/gu, "").trim();
-  }
-  if (params.append_type) name = `[${node.type.toUpperCase()}] ${name}`;
-  return name;
+function getNodeDisplayName(node, _params) {
+  return node.name;
 }
 function formatClashProxy(node, params) {
   const kv = [];
@@ -3140,11 +2716,11 @@ function formatClashProxy(node, params) {
   kv.push(`port: ${node.port}`);
   if (node.cipher) kv.push(`cipher: ${node.cipher}`);
   if (node.password) kv.push(`password: "${esc(node.password)}"`);
-  if (node.uuid) kv.push(`uuid: "${node.uuid}"`);
+  if (node.uuid) kv.push(`uuid: "${esc(String(node.uuid))}"`);
   if (node.plugin) {
     kv.push(`plugin: ${node.plugin}`);
     if (node["plugin-opts"]) {
-      const opts = Object.entries(node["plugin-opts"]).map(([k, v]) => `${safeKey(k)}: "${esc(v)}"`).join(", ");
+      const opts = Object.entries(node["plugin-opts"]).map(([k, v]) => `${safeKey(k)}: "${esc(String(v))}"`).join(", ");
       kv.push(`plugin-opts: {${opts}}`);
     }
   }
@@ -3167,42 +2743,6 @@ function formatClashProxy(node, params) {
     else if (typeof v === "string") kv.push(`${safeKey(k)}: "${esc(v)}"`);
   }
   return `  - { ${kv.join(", ")} }`;
-}
-function applyNodeFilters(nodes, params) {
-  let f = [...nodes];
-  if (params.include) {
-    try {
-      const r = new RegExp(params.include);
-      f = f.filter((n) => r.test(n.name));
-    } catch {
-    }
-  }
-  if (params.exclude) {
-    try {
-      const r = new RegExp(params.exclude);
-      f = f.filter((n) => !r.test(n.name));
-    } catch {
-    }
-  }
-  if (params.sort) f.sort((a, b) => a.name.localeCompare(b.name));
-  return f;
-}
-function applyRenames(nodes, renameStr) {
-  const rules = renameStr.split("|").map((r) => {
-    const idx = r.lastIndexOf("@");
-    if (idx === -1) return null;
-    return { pattern: r.slice(0, idx), replacement: r.slice(idx + 1) };
-  }).filter(Boolean);
-  return nodes.map((node) => {
-    let name = node.name;
-    for (const rule of rules) {
-      try {
-        name = name.replace(new RegExp(rule.pattern), rule.replacement);
-      } catch {
-      }
-    }
-    return name !== node.name ? { ...node, name } : node;
-  });
 }
 function sanitizeProviderName(name) {
   return name.replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s+/g, "_") || "provider";
@@ -3279,6 +2819,7 @@ var init_clash = __esm({
   "src/generators/clash.ts"() {
     "use strict";
     init_ini_parser();
+    init_node_utils();
   }
 });
 
@@ -3293,12 +2834,14 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
     {
       type: "mixed",
       tag: "mixed-in",
-      listen: "::",
+      listen: "127.0.0.1",
       listen_port: inPort
     }
   ];
-  const allNodes = applySingboxNodeFilters(sourceConfig.proxies, params);
-  const allNodeNames = allNodes.map((n) => n.name);
+  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const allNodes = prepared.nodes;
+  const allNodeNames = prepared.allNames;
+  const nodeNameMap = prepared.displayNames;
   const outbounds = [];
   outbounds.push({ type: "direct", tag: "DIRECT" });
   outbounds.push({ type: "block", tag: "REJECT" });
@@ -3313,7 +2856,7 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
   if (params.config && iniConfig.rulesetEntries.length > 0) {
     const expandedGroups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
     for (const group of expandedGroups) {
-      const members = group.proxies.filter((p) => allNodeNames.includes(p) || ["DIRECT", "REJECT"].includes(p));
+      const members = group.proxies.filter((p) => allNodeNames.includes(p) || nodeNameMap.has(p) || ["DIRECT", "REJECT"].includes(p)).map((p) => mapNodeReference(p, nodeNameMap));
       if (members.length === 0) continue;
       const tag = group.name;
       if (group.groupType === "url-test") {
@@ -3356,9 +2899,9 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
     for (const rule of sourceConfig.rules || []) {
       const singboxRule = convertRuleToSingbox(rule);
       if (singboxRule) {
-        const parts = rule.split(",");
-        const target = parts.length >= 2 ? parts[parts.length - 1].trim() : "DIRECT";
-        rules.push({ ...singboxRule, outbound: target });
+        const parsedRule = parseClashRule(rule);
+        const target = parsedRule?.target || "DIRECT";
+        rules.push({ ...singboxRule, outbound: mapNodeReference(target, nodeNameMap) });
       }
     }
   }
@@ -3370,13 +2913,7 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
 function convertNodeToSingboxOutbound(node, params) {
   const singboxType = SINGBOX_TYPE_MAP[node.type];
   if (!singboxType) return null;
-  let displayName = node.name;
-  if (params.emoji === false) {
-    displayName = displayName.replace(/[\u{1F000}-\u{1FFFF}]/gu, "").trim();
-  }
-  if (params.append_type) {
-    displayName = `[${node.type.toUpperCase()}] ${displayName}`;
-  }
+  const displayName = node.name;
   const outbound = {
     type: singboxType,
     tag: displayName,
@@ -3409,32 +2946,11 @@ function convertNodeToSingboxOutbound(node, params) {
   }
   return outbound;
 }
-function applySingboxNodeFilters(nodes, params) {
-  let filtered = [...nodes];
-  if (params.include) {
-    try {
-      const regex = new RegExp(params.include);
-      filtered = filtered.filter((n) => regex.test(n.name));
-    } catch {
-    }
-  }
-  if (params.exclude) {
-    try {
-      const regex = new RegExp(params.exclude);
-      filtered = filtered.filter((n) => !regex.test(n.name));
-    } catch {
-    }
-  }
-  if (params.sort) {
-    filtered.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  return filtered;
-}
 function convertRuleToSingbox(rule) {
-  const parts = rule.split(",");
-  if (parts.length < 2) return null;
-  const ruleType = parts[0].trim();
-  const value = parts.slice(1).join(",").trim();
+  const parsed = parseClashRule(rule);
+  if (!parsed) return null;
+  const ruleType = parsed.type;
+  const value = parsed.value;
   switch (ruleType) {
     case "DOMAIN-SUFFIX":
       return { domain_suffix: value };
@@ -3473,6 +2989,7 @@ var init_singbox = __esm({
   "src/generators/singbox.ts"() {
     "use strict";
     init_ini_parser();
+    init_node_utils();
     SINGBOX_TYPE_MAP = {
       ss: "shadowsocks",
       ssr: "shadowsocksr",
@@ -3504,7 +3021,9 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
   }
   lines.push("");
   lines.push("[Proxy]");
-  const allNodes = applySurgeNodeFilters(sourceConfig.proxies, params);
+  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const allNodes = prepared.nodes;
+  const nodeNameMap = prepared.displayNames;
   for (const node of allNodes) {
     const surgeProxy = convertNodeToSurgeProxy(node, params);
     if (surgeProxy) {
@@ -3512,15 +3031,13 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
     }
   }
   lines.push("");
-  const allNodeNames = allNodes.map((n) => n.name);
+  const allNodeNames = prepared.allNames;
   if (params.config && iniConfig.customProxyGroups.length > 0) {
     const groups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
     lines.push("[Proxy Group]");
     for (const group of groups) {
       const groupType = mapSurgeGroupType(group.groupType);
-      const validProxies = group.proxies.filter(
-        (p) => p === "DIRECT" || p === "REJECT" || p === "REJECT-TLS" || allNodeNames.includes(p) || groups.some((g) => g.name === p)
-      );
+      const validProxies = group.proxies.filter((p) => p === "DIRECT" || p === "REJECT" || p === "REJECT-TLS" || allNodeNames.includes(p) || nodeNameMap.has(p) || groups.some((g) => g.name === p)).map((p) => mapNodeReference(p, nodeNameMap));
       const proxyStr = validProxies.join(", ");
       if ((group.groupType === "url-test" || group.groupType === "fallback") && group.url) {
         lines.push(`${group.name} = ${groupType}, ${proxyStr}, url = ${group.url}, interval = ${group.interval || 300}`);
@@ -3533,7 +3050,7 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
     lines.push("[Proxy Group]");
     for (const group of sourceConfig["proxy-groups"]) {
       const groupType = mapSurgeGroupType(group.type || "select");
-      const proxies = (group.proxies || []).join(", ");
+      const proxies = (group.proxies || []).map((proxy) => mapNodeReference(proxy, nodeNameMap)).join(", ");
       if (!proxies) continue;
       lines.push(`${group.name} = ${groupType}, ${proxies}`);
     }
@@ -3568,9 +3085,9 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
       if (!rule || rule.startsWith("#")) continue;
       const converted = convertRuleToSurge(rule);
       if (converted) {
-        const parts = rule.split(",");
-        const target = parts.length >= 2 ? parts[parts.length - 1].trim() : "DIRECT";
-        lines.push(`${converted},${target}`);
+        const parsedRule = parseClashRule(rule);
+        const target = parsedRule?.target || "DIRECT";
+        lines.push(`${converted},${mapNodeReference(target, nodeNameMap)}`);
       }
     }
     lines.push("");
@@ -3583,36 +3100,8 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
   lines.push("");
   return lines.join("\n");
 }
-function applySurgeNodeFilters(nodes, params) {
-  let filtered = [...nodes];
-  if (params.include) {
-    try {
-      const regex = new RegExp(params.include);
-      filtered = filtered.filter((n) => regex.test(n.name));
-    } catch {
-    }
-  }
-  if (params.exclude) {
-    try {
-      const regex = new RegExp(params.exclude);
-      filtered = filtered.filter((n) => !regex.test(n.name));
-    } catch {
-    }
-  }
-  if (params.sort) {
-    filtered.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  return filtered;
-}
 function convertNodeToSurgeProxy(node, params) {
-  let displayName = node.name;
-  if (params.emoji === false) {
-    displayName = displayName.replace(/[\u{1F000}-\u{1FFFF}]/gu, "").trim();
-  }
-  if (params.append_type) {
-    displayName = `[${node.type.toUpperCase()}] ${displayName}`;
-  }
-  const safeName = displayName.replace(/[,=]/g, "\\$&");
+  const safeName = node.name.replace(/[,=]/g, "\\$&");
   switch (node.type) {
     case "ss": {
       const obfs = node.plugin === "obfs" && node["plugin-opts"] ? `, obfs=${node["plugin-opts"].mode || "http"}, obfs-host=${node["plugin-opts"].host || ""}` : "";
@@ -3673,10 +3162,10 @@ function mapSurgeGroupType(groupType) {
   }
 }
 function convertRuleToSurge(rule) {
-  const parts = rule.split(",");
-  if (parts.length < 2) return null;
-  const ruleType = parts[0].trim().toUpperCase();
-  const value = parts.slice(1).join(",").trim();
+  const parsed = parseClashRule(rule);
+  if (!parsed) return null;
+  const ruleType = parsed.type;
+  const value = parsed.value;
   switch (ruleType) {
     case "DOMAIN-SUFFIX":
       return `DOMAIN-SUFFIX,${value}`;
@@ -3702,6 +3191,7 @@ var init_surge = __esm({
   "src/generators/surge.ts"() {
     "use strict";
     init_ini_parser();
+    init_node_utils();
   }
 });
 
@@ -4046,7 +3536,7 @@ var init_css = __esm({
                 opacity 0.3s ease;
   }
   #advanced.show {
-    max-height: 400px;
+    max-height: 1200px;
     opacity: 1;
   }
   .toggle-params {
@@ -4071,7 +3561,13 @@ var init_css = __esm({
   [dir="rtl"] .lang-trigger { padding: 0 10px 0 28px; }
   [dir="rtl"] .custom-select-arrow { right: auto; left: 12px; }
   [dir="rtl"] input, [dir="rtl"] textarea { direction: rtl; text-align: right; }
-  [dir="rtl"] #url, [dir="rtl"] #config-custom, [dir="rtl"] #result-url { direction: ltr; text-align: left; }
+  [dir="rtl"] .url-input, [dir="rtl"] #config-custom, [dir="rtl"] #result-url,
+  [dir="rtl"] #ua, [dir="rtl"] #include, [dir="rtl"] #exclude, [dir="rtl"] #rename {
+    direction: ltr; text-align: left; unicode-bidi: plaintext;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
 </style>
 </head>
 `;
@@ -4098,20 +3594,20 @@ var init_body2 = __esm({
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       </a>
       <div class="custom-select" id="lang-select-wrapper" style="width:auto">
-        <div class="custom-select-trigger lang-trigger" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+        <div class="custom-select-trigger lang-trigger" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-controls="lang-select-listbox" aria-activedescendant="lang-option-zh-Hans">
           <span class="custom-select-trigger-text">\u7B80\u4F53\u4E2D\u6587</span>
           <svg class="custom-select-arrow" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <div class="custom-select-dropdown" role="listbox">
-          <div class="custom-select-option selected" data-value="zh-Hans" role="option">\u7B80\u4F53\u4E2D\u6587</div>
-          <div class="custom-select-option" data-value="zh-Hant" role="option">\u7E41\u9AD4\u4E2D\u6587</div>
-          <div class="custom-select-option" data-value="en" role="option">English</div>
-          <div class="custom-select-option" data-value="ja" role="option">\u65E5\u672C\u8A9E</div>
-          <div class="custom-select-option" data-value="ko" role="option">\uD55C\uAD6D\uC5B4</div>
-          <div class="custom-select-option" data-value="ru" role="option">\u0420\u0443\u0441\u0441\u043A\u0438\u0439</div>
-          <div class="custom-select-option" data-value="vi" role="option">Ti\u1EBFng Vi\u1EC7t</div>
-          <div class="custom-select-option" data-value="ar" role="option">\u0627\u0644\u0639\u0631\u0628\u064A\u0629</div>
-          <div class="custom-select-option" data-value="fa" role="option">\u0641\u0627\u0631\u0633\u06CC</div>
+        <div class="custom-select-dropdown" id="lang-select-listbox" role="listbox">
+          <div class="custom-select-option selected" id="lang-option-zh-Hans" data-value="zh-Hans" role="option" aria-selected="true">\u7B80\u4F53\u4E2D\u6587</div>
+          <div class="custom-select-option" id="lang-option-zh-Hant" data-value="zh-Hant" role="option" aria-selected="false">\u7E41\u9AD4\u4E2D\u6587</div>
+          <div class="custom-select-option" id="lang-option-en" data-value="en" role="option" aria-selected="false">English</div>
+          <div class="custom-select-option" id="lang-option-ja" data-value="ja" role="option" aria-selected="false">\u65E5\u672C\u8A9E</div>
+          <div class="custom-select-option" id="lang-option-ko" data-value="ko" role="option" aria-selected="false">\uD55C\uAD6D\uC5B4</div>
+          <div class="custom-select-option" id="lang-option-ru" data-value="ru" role="option" aria-selected="false">\u0420\u0443\u0441\u0441\u043A\u0438\u0439</div>
+          <div class="custom-select-option" id="lang-option-vi" data-value="vi" role="option" aria-selected="false">Ti\u1EBFng Vi\u1EC7t</div>
+          <div class="custom-select-option" id="lang-option-ar" data-value="ar" role="option" aria-selected="false">\u0627\u0644\u0639\u0631\u0628\u064A\u0629</div>
+          <div class="custom-select-option" id="lang-option-fa" data-value="fa" role="option" aria-selected="false">\u0641\u0627\u0631\u0633\u06CC</div>
         </div>
         <select onchange="applyLanguage(this.value)" style="display:none">
           <option value="zh-Hans">\u7B80\u4F53\u4E2D\u6587</option>
@@ -4136,11 +3632,11 @@ var init_body2 = __esm({
     </div>
 
     <div class="form-group">
-      <label data-i18n="labelUrl">\u539F\u59CB\u8BA2\u9605\u94FE\u63A5</label>
+      <label for="url-0" data-i18n="labelUrl">\u539F\u59CB\u8BA2\u9605\u94FE\u63A5</label>
       <div id="url-rows">
         <div class="url-row">
-          <input type="url" class="url-input" required>
-          <button class="url-row-del" onclick="removeUrlRow(this)" title="\u5220\u9664" style="display:none">\xD7</button>
+          <input type="url" id="url-0" class="url-input" required autocomplete="url">
+          <button class="url-row-del" onclick="removeUrlRow(this)" title="\u5220\u9664" aria-label="\u5220\u9664\u8BA2\u9605\u94FE\u63A5" style="display:none">\xD7</button>
         </div>
       </div>
       <button class="btn-add-url" onclick="addUrlRow()" data-i18n="btnAddUrl">\u6DFB\u52A0\u8BA2\u9605\u94FE\u63A5</button>
@@ -4233,10 +3729,10 @@ var init_body2 = __esm({
       <label style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;display:block;" data-i18n="labelResult">\u751F\u6210\u7684\u8BA2\u9605\u94FE\u63A5\uFF1A</label>
       <textarea class="result-url" id="result-url" readonly rows="3"></textarea>
       <div class="result-actions">
-        <button class="btn-sm" onclick="copyUrl()" data-i18n="btnCopy">\u590D\u5236\u94FE\u63A5</button>
-        <button class="btn-sm download" id="btn-download" onclick="downloadConfig()" data-i18n="btnDownload">\u4E0B\u8F7D\u914D\u7F6E</button>
+        <button class="btn-sm" id="btn-copy" onclick="copyUrl()" data-i18n="btnCopy" disabled>\u590D\u5236\u94FE\u63A5</button>
+        <button class="btn-sm download" id="btn-download" onclick="downloadConfig()" data-i18n="btnDownload" disabled>\u4E0B\u8F7D\u914D\u7F6E</button>
       </div>
-      <div class="status" id="status"></div>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
     </div>
   </div>
 </div>
@@ -4396,6 +3892,7 @@ var init_script = __esm({
       options.forEach(function(o) { o.classList.remove('highlighted'); });
       if (optionEl) {
         optionEl.classList.add('highlighted');
+        trigger.setAttribute('aria-activedescendant', optionEl.id || '');
         optionEl.scrollIntoView({ block: 'nearest' });
       }
     }
@@ -4732,6 +4229,8 @@ function doApplyLanguage(lang, newDir) {
   document.documentElement.lang = lang;
   document.documentElement.dir = newDir;
   document.title = I18N[lang].title;
+  var langSelect = document.querySelector('#lang-select-wrapper select');
+  if (langSelect) langSelect.value = lang;
 
   [].forEach.call(document.querySelectorAll('[data-i18n]'), function(el) {
     var k = el.getAttribute('data-i18n');
@@ -4766,6 +4265,12 @@ function doApplyLanguage(lang, newDir) {
     });
     if (w.id === 'lang-select-wrapper' && tt) {
       tt.textContent = {'zh-Hans':'\u7B80\u4F53\u4E2D\u6587','zh-Hant':'\u7E41\u9AD4\u4E2D\u6587','en':'English','ja':'\u65E5\u672C\u8A9E','ko':'\uD55C\uAD6D\uC5B4','ru':'\u0420\u0443\u0441\u0441\u043A\u0438\u0439','vi':'Ti\u1EBFng Vi\u1EC7t','ar':'\u0627\u0644\u0639\u0631\u0628\u064A\u0629','fa':'\u0641\u0627\u0631\u0633\u06CC'}[lang] || '\u7B80\u4F53\u4E2D\u6587';
+      [].forEach.call(w.querySelectorAll('.custom-select-option'), function(option) {
+        var selected = option.getAttribute('data-value') === lang;
+        option.classList.toggle('selected', selected);
+        option.setAttribute('aria-selected', String(selected));
+        if (selected) w.querySelector('.custom-select-trigger').setAttribute('aria-activedescendant', option.id || '');
+      });
     }
   });
 
@@ -4872,35 +4377,68 @@ function applyLanguage(lang) {
 
 currentLang = detectLanguage();
 applyLanguage(currentLang);
+setMode('basic');
+onConfigChange();
 
 // ========== \u73B0\u6709\u4E1A\u52A1\u51FD\u6570 ==========
 function onConfigChange() {
   var val = document.getElementById('config-select').value;
-  document.getElementById('config-custom-group').classList.toggle('show', val === '__custom__');
+  var group = document.getElementById('config-custom-group');
+  var visible = val === '__custom__';
+  group.classList.toggle('show', visible);
+  group.setAttribute('aria-hidden', String(!visible));
+  [].forEach.call(group.querySelectorAll('input, select, textarea, button'), function(el) { el.disabled = !visible; });
 }
 
 function setMode(mode) {
-  document.getElementById('advanced').classList.toggle('show', mode === 'advanced');
-  document.getElementById('mode-toggle').classList.toggle('advanced', mode === 'advanced');
-  document.getElementById('mode-basic').classList.toggle('active', mode === 'basic');
-  document.getElementById('mode-advanced').classList.toggle('active', mode === 'advanced');
+  var advanced = document.getElementById('advanced');
+  var isAdvanced = mode === 'advanced';
+  advanced.classList.toggle('show', isAdvanced);
+  advanced.setAttribute('aria-hidden', String(!isAdvanced));
+  [].forEach.call(advanced.querySelectorAll('input, select, textarea, button'), function(el) { el.disabled = !isAdvanced; });
+  document.getElementById('mode-toggle').classList.toggle('advanced', isAdvanced);
+  document.getElementById('mode-basic').classList.toggle('active', !isAdvanced);
+  document.getElementById('mode-advanced').classList.toggle('active', isAdvanced);
 }
 
 function generateSubscription() {
   var urlEls = document.querySelectorAll('.url-input');
   var urls = [];
+  var invalid = false;
   urlEls.forEach(function(el) {
     var v = el.value.trim();
-    if (v) urls.push(v);
+    if (!v) return;
+    try {
+      var parsed = new URL(v);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') invalid = true;
+    } catch (e) { invalid = true; }
+    urls.push(v);
   });
   if (urls.length === 0) {
+    clearResult();
+    showResult('msgEnterUrl');
+    return;
+  }
+  if (invalid || urls.length > 5) {
+    clearResult();
+    showResult('msgEnterUrl');
+    return;
+  }
+
+  var includeValue = document.getElementById('include').value.trim();
+  var excludeValue = document.getElementById('exclude').value.trim();
+  try {
+    if (includeValue) new RegExp(includeValue);
+    if (excludeValue) new RegExp(excludeValue);
+  } catch (e) {
+    clearResult();
     showResult('msgEnterUrl');
     return;
   }
 
   var params = new URLSearchParams();
   params.set('target', document.getElementById('target').value);
-  params.set('url', urls.join('|'));
+  urls.forEach(function(url) { params.append('url', url); });
 
   var configVal = document.getElementById('config-select').value.trim();
   if (configVal === '__custom__') {
@@ -4934,8 +4472,12 @@ function generateSubscription() {
 
   var apiUrl = window.location.origin + '/sub?' + params.toString();
 
+  generatedTarget = document.getElementById('target').value;
+  generatedFilename = filename;
   document.getElementById('result-url').value = apiUrl;
   document.getElementById('result-section').style.display = 'block';
+  document.getElementById('btn-copy').disabled = false;
+  document.getElementById('btn-download').disabled = false;
   setStatus('msgGenerated');
 }
 
@@ -4943,7 +4485,8 @@ function addUrlRow() {
   var container = document.getElementById('url-rows');
   var row = document.createElement('div');
   row.className = 'url-row';
-  row.innerHTML = '<input type="url" class="url-input" required><button class="url-row-del" onclick="removeUrlRow(this)" title="\u5220\u9664">\xD7</button>';
+  var index = document.querySelectorAll('.url-row').length;
+  row.innerHTML = '<input type="url" id="url-' + index + '" class="url-input" required autocomplete="url"><button class="url-row-del" onclick="removeUrlRow(this)" title="\u5220\u9664" aria-label="\u5220\u9664\u8BA2\u9605\u94FE\u63A5">\xD7</button>';
   container.appendChild(row);
   updateUrlDelButtons();
 }
@@ -4968,6 +4511,13 @@ function setStatus(key) {
   el.textContent = t(key);
   el.setAttribute('data-i18n-status', key);
 }
+function clearResult() {
+  document.getElementById('result-url').value = '';
+  document.getElementById('btn-copy').disabled = true;
+  document.getElementById('btn-download').disabled = true;
+  generatedTarget = null;
+  generatedFilename = null;
+}
 function showResult(key) {
   setStatus(key);
   document.getElementById('result-section').style.display = 'block';
@@ -4975,33 +4525,43 @@ function showResult(key) {
 
 function copyUrl() {
   var el = document.getElementById('result-url');
+  if (!el.value) return;
   el.select();
   if (navigator.clipboard) {
     navigator.clipboard.writeText(el.value).then(function() {
       setStatus('msgCopied');
+    }).catch(function() {
+      setStatus('msgDownloadFailed');
     });
   } else {
-    document.execCommand('copy');
-    setStatus('msgCopied');
+    try {
+      document.execCommand('copy');
+      setStatus('msgCopied');
+    } catch (e) {
+      setStatus('msgDownloadFailed');
+    }
   }
 }
 
+var generatedTarget = null;
+var generatedFilename = null;
+
 async function downloadConfig() {
   var apiUrl = document.getElementById('result-url').value;
-  var target = document.getElementById('target').value;
+  if (!apiUrl) { setStatus('msgDownloadFailed'); return; }
   var extMap = { clash: '.yaml', singbox: '.json', surge: '.conf' };
-  var ext = extMap[target] || '.yaml';
-  var name = document.getElementById('filename').value.trim();
-  if (!name) name = 'Prism';
-  name = name.replace(/\\\\.(yaml|json|conf)$/i, '') + ext;
+  var ext = extMap[generatedTarget || document.getElementById('target').value] || '.yaml';
+  var name = generatedFilename || document.getElementById('filename').value.trim() || 'Prism';
+  name = name.replace(/.(yaml|json|conf)$/i, '') + ext;
   try {
-    var resp = await fetch(apiUrl);
+    var resp = await fetch(apiUrl, { referrerPolicy: 'no-referrer' });
+    if (!resp.ok) throw new Error('download failed');
     var blob = await resp.blob();
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 0);
     setStatus('msgDownloadStarted');
   } catch(e) {
     setStatus('msgDownloadFailed');
@@ -5034,28 +4594,155 @@ import { getCookie } from "hono/cookie";
 function parseQueryParams(c) {
   const q = c.req.query();
   return {
-    target: q["target"] || DEFAULT_PARAMS.target,
-    url: q["url"] || DEFAULT_PARAMS.url,
-    config: q["config"] || void 0,
-    include: q["include"] || void 0,
-    exclude: q["exclude"] || void 0,
-    rename: q["rename"] || void 0,
-    filename: q["filename"] || void 0,
-    emoji: parseBool(q["emoji"]) ?? DEFAULT_PARAMS.emoji,
-    append_type: parseBool(q["append_type"]) ?? DEFAULT_PARAMS.append_type,
-    tfo: parseBool(q["tfo"]) ?? DEFAULT_PARAMS.tfo,
-    udp: parseBool(q["udp"]) ?? DEFAULT_PARAMS.udp,
-    sort: parseBool(q["sort"]) ?? DEFAULT_PARAMS.sort,
-    scv: parseBool(q["scv"]) ?? DEFAULT_PARAMS.scv,
-    expand: parseBool(q["expand"]) ?? DEFAULT_PARAMS.expand,
-    tls13: parseBool(q["tls13"]) ?? DEFAULT_PARAMS.tls13,
-    ua: q["ua"] || void 0
+    target: q.target || DEFAULT_PARAMS.target,
+    url: q.url || DEFAULT_PARAMS.url,
+    config: q.config || void 0,
+    include: q.include || void 0,
+    exclude: q.exclude || void 0,
+    rename: q.rename || void 0,
+    filename: q.filename || void 0,
+    emoji: parseBool(q.emoji) ?? DEFAULT_PARAMS.emoji,
+    append_type: parseBool(q.append_type) ?? DEFAULT_PARAMS.append_type,
+    tfo: parseBool(q.tfo) ?? DEFAULT_PARAMS.tfo,
+    udp: parseBool(q.udp) ?? DEFAULT_PARAMS.udp,
+    sort: parseBool(q.sort) ?? DEFAULT_PARAMS.sort,
+    scv: parseBool(q.scv) ?? DEFAULT_PARAMS.scv,
+    expand: parseBool(q.expand) ?? DEFAULT_PARAMS.expand,
+    tls13: parseBool(q.tls13) ?? DEFAULT_PARAMS.tls13,
+    ua: q.ua || void 0
   };
+}
+function getSourceUrls(c) {
+  const values = c.req.queries("url") || [];
+  if (values.length > 1) return values.map((value) => value.trim()).filter(Boolean);
+  if (values.length === 1) {
+    const value = values[0].trim();
+    if (!value.includes("|")) return [value];
+    const legacy = value.split("|").map((part) => part.trim()).filter(Boolean);
+    return legacy.length > 1 && legacy.every(isSafeUrl) ? legacy : [value];
+  }
+  return [];
 }
 function buildUpstreamHeaders(c) {
   const q = c.req.query();
-  const ua = q["ua"] && q["ua"].trim() || "clash-verge/v2.4.2";
+  const requested = (q.ua || "").trim();
+  const ua = requested || SAFE_FETCH_HEADERS["User-Agent"];
   return { "User-Agent": ua };
+}
+function validateParams(params) {
+  if (!["clash", "singbox", "surge"].includes(params.target)) return "\u9519\u8BEF\uFF1A\u4E0D\u652F\u6301\u7684 target \u7C7B\u578B";
+  for (const [name, value] of Object.entries(params)) {
+    if (typeof value === "string" && value.length > MAX_PARAM_LENGTH) return `\u9519\u8BEF\uFF1A${name} \u53C2\u6570\u8FC7\u957F`;
+  }
+  if (params.config && !isSafeUrl(params.config)) return "\u9519\u8BEF\uFF1Aconfig \u5FC5\u987B\u662F\u5B89\u5168\u7684 HTTP(S) URL";
+  if (params.ua && !/^[^\r\n]{1,256}$/.test(params.ua)) return "\u9519\u8BEF\uFF1AUser-Agent \u65E0\u6548";
+  for (const pattern of [params.include, params.exclude]) {
+    if (pattern) {
+      try {
+        new RegExp(pattern);
+      } catch {
+        return "\u9519\u8BEF\uFF1A\u8FC7\u6EE4\u6B63\u5219\u8868\u8FBE\u5F0F\u65E0\u6548";
+      }
+    }
+  }
+  return null;
+}
+function isSafeUrl(raw2) {
+  if (!raw2 || raw2.length > MAX_URL_LENGTH || /[\r\n]/.test(raw2)) return false;
+  let url;
+  try {
+    url = new URL(raw2);
+  } catch {
+    return false;
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return false;
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
+  if (host === "metadata.google.internal" || host === "169.254.169.254") return false;
+  if (/^(127|10|0)\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return false;
+  const match2 = host.match(/^172\.(\d{1,3})\./);
+  if (match2 && Number(match2[1]) >= 16 && Number(match2[1]) <= 31) return false;
+  if (/^(::1|fc|fd|fe8|fe9|fea|feb)/i.test(host)) return false;
+  return true;
+}
+async function fetchTextSafe(rawUrl, headers, maxBytes, redirects = 0) {
+  if (!isSafeUrl(rawUrl)) throw new Error("\u76EE\u6807 URL \u4E0D\u88AB\u5141\u8BB8");
+  if (redirects > MAX_REDIRECTS) throw new Error("\u91CD\u5B9A\u5411\u6B21\u6570\u8FC7\u591A");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(rawUrl, { headers, redirect: "manual", signal: controller.signal });
+  } catch (error) {
+    clearTimeout(timer);
+    throw error;
+  }
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("location");
+    if (!location) throw new Error("\u4E0A\u6E38\u91CD\u5B9A\u5411\u7F3A\u5C11\u76EE\u6807");
+    const next = new URL(location, rawUrl).toString();
+    return fetchTextSafe(next, headers, maxBytes, redirects + 1);
+  }
+  const length = Number(response.headers.get("content-length"));
+  if (Number.isFinite(length) && length > maxBytes) throw new Error("\u4E0A\u6E38\u54CD\u5E94\u8FC7\u5927");
+  const text = await readBodyWithLimit(response, maxBytes, FETCH_TIMEOUT_MS);
+  return { ok: response.ok, status: response.status, headers: response.headers, text };
+}
+async function readBodyWithLimit(response, maxBytes, timeoutMs) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("\u4E0A\u6E38\u54CD\u5E94\u8D85\u65F6")), timeoutMs);
+  });
+  try {
+    while (true) {
+      const { done, value } = await Promise.race([reader.read(), timeout]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error("\u4E0A\u6E38\u54CD\u5E94\u8FC7\u5927");
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => void 0);
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+async function mapWithConcurrency(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+function errorResponse(c, message, status) {
+  return c.text(message, status, {
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer"
+  });
 }
 function parseBool(value) {
   if (value === void 0 || value === null) return void 0;
@@ -5066,38 +4753,52 @@ function parseBool(value) {
 }
 function mergeConfigs(configs) {
   const base = configs[0];
-  const allProxies = configs.flatMap((c) => c.proxies);
-  const seen = /* @__PURE__ */ new Set();
-  const merged = allProxies.filter((p) => {
-    if (seen.has(p.name)) return false;
-    seen.add(p.name);
+  const allProxies = configs.flatMap((config) => config.proxies || []);
+  const seenProxies = /* @__PURE__ */ new Set();
+  const proxies = allProxies.filter((proxy) => {
+    if (seenProxies.has(proxy.name)) return false;
+    seenProxies.add(proxy.name);
     return true;
   });
-  return { ...base, proxies: merged };
+  const groupMap = /* @__PURE__ */ new Map();
+  for (const config of configs) {
+    for (const group of config["proxy-groups"] || []) {
+      const current = groupMap.get(group.name);
+      if (!current) {
+        groupMap.set(group.name, { ...group, proxies: [...group.proxies || []] });
+      } else {
+        current.proxies = [.../* @__PURE__ */ new Set([...current.proxies || [], ...group.proxies || []])];
+      }
+    }
+  }
+  const rules = [...new Set(configs.flatMap((config) => config.rules || []))];
+  const dns = Object.assign({}, ...configs.map((config) => config.dns || {}));
+  const hosts = Object.assign({}, ...configs.map((config) => config.hosts || {}));
+  const merged = { ...base, proxies };
+  if (groupMap.size > 0) merged["proxy-groups"] = [...groupMap.values()];
+  if (rules.length > 0) merged.rules = rules;
+  if (Object.keys(dns).length > 0) merged.dns = dns;
+  if (Object.keys(hosts).length > 0) merged.hosts = hosts;
+  return merged;
 }
 function createDefaultIniConfig() {
   return {
     rulesetEntries: [],
-    customProxyGroups: [
-      {
-        name: "\u{1F680} \u8282\u70B9\u9009\u62E9",
-        groupType: "select",
-        proxies: [".*"]
-      }
-    ],
+    customProxyGroups: [{ name: "\u{1F680} \u8282\u70B9\u9009\u62E9", groupType: "select", proxies: [".*"] }],
     enableRuleGenerator: false,
     overwriteOriginalRules: false
   };
 }
+function sanitizeFilename(value) {
+  return value.replace(/[\r\n\\/:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, 120) || "Prism";
+}
 function utf8ToBase64(str) {
   const bytes = new TextEncoder().encode(str);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
-var app, worker_default;
+var app, MAX_SOURCE_URLS, MAX_RULESET_URLS, MAX_URL_LENGTH, MAX_PARAM_LENGTH, MAX_SUBSCRIPTION_BYTES, MAX_CONFIG_BYTES, MAX_RULESET_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, SAFE_FETCH_HEADERS, worker_default;
 var init_worker = __esm({
   "src/worker.ts"() {
     "use strict";
@@ -5110,6 +4811,16 @@ var init_worker = __esm({
     init_types();
     init_frontend();
     app = new Hono2();
+    MAX_SOURCE_URLS = 5;
+    MAX_RULESET_URLS = 50;
+    MAX_URL_LENGTH = 2048;
+    MAX_PARAM_LENGTH = 4096;
+    MAX_SUBSCRIPTION_BYTES = 2 * 1024 * 1024;
+    MAX_CONFIG_BYTES = 512 * 1024;
+    MAX_RULESET_BYTES = 1024 * 1024;
+    FETCH_TIMEOUT_MS = 15e3;
+    MAX_REDIRECTS = 3;
+    SAFE_FETCH_HEADERS = { "User-Agent": "clash-verge/v2.4.2" };
     app.get("/", (c) => {
       const theme = getCookie(c, "prism-theme");
       if (theme === "light" || theme === "dark") {
@@ -5124,84 +4835,66 @@ var init_worker = __esm({
     app.get("/sub", async (c) => {
       try {
         const params = parseQueryParams(c);
-        if (!params.url) {
-          return c.text("\u9519\u8BEF\uFF1A\u7F3A\u5C11 url \u53C2\u6570\uFF08\u539F\u59CB\u8BA2\u9605\u94FE\u63A5\uFF09", 400);
+        const validationError = validateParams(params);
+        if (validationError) return errorResponse(c, validationError, 400);
+        const urls = getSourceUrls(c);
+        if (urls.length === 0) {
+          return errorResponse(c, "\u9519\u8BEF\uFF1A\u7F3A\u5C11 url \u53C2\u6570\uFF08\u539F\u59CB\u8BA2\u9605\u94FE\u63A5\uFF09", 400);
         }
-        const urls = params.url.split("|").filter(Boolean);
+        if (urls.length > MAX_SOURCE_URLS) {
+          return errorResponse(c, `\u9519\u8BEF\uFF1A\u6700\u591A\u652F\u6301 ${MAX_SOURCE_URLS} \u4E2A\u8BA2\u9605\u94FE\u63A5`, 400);
+        }
         let sourceConfig;
         let upstreamUserInfo = null;
-        if (urls.length === 1) {
-          try {
-            const response = await fetch(urls[0], {
-              headers: buildUpstreamHeaders(c)
-            });
+        try {
+          const results = [];
+          for (let index = 0; index < urls.length; index++) {
+            const response = await fetchTextSafe(urls[index], buildUpstreamHeaders(c), MAX_SUBSCRIPTION_BYTES);
             if (!response.ok) {
-              const snippet = (await response.text()).slice(0, 300).replace(/\s+/g, " ").trim();
-              return c.text(`\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u8BA2\u9605\u94FE\u63A5\uFF0CHTTP ${response.status}${snippet ? "\uFF1A" + snippet : ""}`, 502);
+              throw new Error(`\u8BA2\u9605 ${index + 1} \u8FD4\u56DE HTTP ${response.status}`);
             }
-            upstreamUserInfo = response.headers.get("subscription-userinfo");
-            sourceConfig = parseClashYaml(await response.text());
-          } catch (err) {
-            return c.text(`\u9519\u8BEF\uFF1A\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25 - ${err.message}`, 502);
+            if (!upstreamUserInfo) upstreamUserInfo = response.headers.get("subscription-userinfo");
+            results.push(parseClashYaml(response.text));
           }
-        } else {
-          try {
-            const results = await Promise.all(urls.map(async (url) => {
-              const response = await fetch(url, {
-                headers: buildUpstreamHeaders(c)
-              });
-              if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
-              if (!upstreamUserInfo) {
-                upstreamUserInfo = response.headers.get("subscription-userinfo");
-              }
-              return parseClashYaml(await response.text());
-            }));
-            sourceConfig = mergeConfigs(results);
-          } catch (err) {
-            return c.text(`\u9519\u8BEF\uFF1A\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25 - ${err.message}`, 502);
-          }
+          sourceConfig = mergeConfigs(results);
+        } catch (err) {
+          console.error("\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25:", err.message);
+          return errorResponse(c, "\u9519\u8BEF\uFF1A\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u94FE\u63A5\u6216\u7A0D\u540E\u91CD\u8BD5", 502);
         }
         if (!sourceConfig.proxies || sourceConfig.proxies.length === 0) {
-          return c.text("\u9519\u8BEF\uFF1A\u8BA2\u9605\u4E2D\u672A\u627E\u5230\u4EE3\u7406\u8282\u70B9", 400);
+          return errorResponse(c, "\u9519\u8BEF\uFF1A\u8BA2\u9605\u4E2D\u672A\u627E\u5230\u6709\u6548\u4EE3\u7406\u8282\u70B9", 400);
         }
         let iniConfig = createDefaultIniConfig();
         const ruleContents = {};
         if (params.config) {
           try {
-            const configResponse = await fetch(params.config, {
-              headers: buildUpstreamHeaders(c)
-            });
-            if (configResponse.ok) {
-              const iniContent = await configResponse.text();
-              iniConfig = parseIniConfig(iniContent);
-              const downloadPromises = iniConfig.rulesetEntries.filter((entry) => !entry.isSpecial && entry.url).map(async (entry) => {
-                try {
-                  const ruleResponse = await fetch(entry.url, {
-                    headers: buildUpstreamHeaders(c)
-                  });
-                  if (ruleResponse.ok) {
-                    const text = await ruleResponse.text();
-                    return {
-                      url: entry.url,
-                      lines: text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.startsWith(";"))
-                    };
-                  }
-                } catch {
-                }
-                return { url: entry.url, lines: [] };
-              });
-              const results = await Promise.all(downloadPromises);
-              for (const { url, lines } of results) {
-                ruleContents[url] = lines;
-              }
+            const configResponse = await fetchTextSafe(params.config, buildUpstreamHeaders(c), MAX_CONFIG_BYTES);
+            if (!configResponse.ok) {
+              return errorResponse(c, "\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u89C4\u5219\u914D\u7F6E", 502);
             }
+            iniConfig = parseIniConfig(configResponse.text);
+            const entries = iniConfig.rulesetEntries.filter((entry) => !entry.isSpecial && entry.url).slice(0, MAX_RULESET_URLS);
+            const results = await mapWithConcurrency(entries, 3, async (entry) => {
+              try {
+                const ruleResponse = await fetchTextSafe(entry.url, buildUpstreamHeaders(c), MAX_RULESET_BYTES);
+                if (!ruleResponse.ok) return { url: entry.url, lines: [] };
+                return {
+                  url: entry.url,
+                  lines: ruleResponse.text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith(";"))
+                };
+              } catch {
+                return { url: entry.url, lines: [] };
+              }
+            });
+            for (const { url, lines } of results) ruleContents[url] = lines;
           } catch (err) {
             console.error("\u4E0B\u8F7D\u89C4\u5219\u914D\u7F6E\u5931\u8D25:", err.message);
+            return errorResponse(c, "\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u6216\u89E3\u6790\u89C4\u5219\u914D\u7F6E", 502);
           }
         }
         let output;
         let contentType;
-        const cleanBase = (params.filename || "Prism").replace(/\.(yaml|json|conf)$/i, "");
+        const cleanBase = sanitizeFilename(params.filename || "Prism");
         switch (params.target) {
           case "clash":
             output = generateClashConfig(sourceConfig, iniConfig, params, ruleContents);
@@ -5216,7 +4909,7 @@ var init_worker = __esm({
             contentType = "text/plain; charset=utf-8";
             break;
           default:
-            return c.text("\u9519\u8BEF\uFF1A\u4E0D\u652F\u6301\u7684 target \u7C7B\u578B", 400);
+            return errorResponse(c, "\u9519\u8BEF\uFF1A\u4E0D\u652F\u6301\u7684 target \u7C7B\u578B", 400);
         }
         const userInfoHeader = upstreamUserInfo && upstreamUserInfo.trim() !== "" ? upstreamUserInfo : "upload=0; download=0; total=0; expire=0";
         const safeName = utf8ToBase64(cleanBase);
@@ -5226,6 +4919,9 @@ var init_worker = __esm({
             "Content-Type": contentType,
             "Content-Disposition": `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(cleanBase)}`,
             "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
             "subscription-userinfo": userInfoHeader,
             "profile-update-interval": "24",
             "profile-title": safeName
@@ -5233,59 +4929,72 @@ var init_worker = __esm({
         });
       } catch (err) {
         console.error("\u8F6C\u6362\u5F02\u5E38:", err.message);
-        return c.text(`\u5185\u90E8\u9519\u8BEF\uFF1A${err.message}`, 500);
+        return errorResponse(c, "\u5185\u90E8\u9519\u8BEF\uFF1A\u8BA2\u9605\u8F6C\u6362\u5931\u8D25", 500);
       }
     });
-    app.options("/sub", (c) => {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type"
-        }
-      });
-    });
+    app.options("/sub", (c) => new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Cache-Control": "no-store"
+      }
+    }));
     worker_default = app;
   }
 });
 
 // src/vercel.ts
 var app2;
+var MAX_BODY_BYTES = 1024 * 1024;
 async function handler(req, res) {
   if (!app2) {
     try {
       app2 = (await Promise.resolve().then(() => (init_worker(), worker_exports))).default;
     } catch (err) {
+      console.error("Vercel app import failed:", err?.message);
       res.statusCode = 500;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.end(`Import Error: ${err.message}
-
-${err.stack || ""}`);
+      res.end("Prism \u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528");
       return;
     }
   }
   try {
-    const host = req.headers.host || "localhost";
-    const url = `https://${host}${req.url}`;
+    const url = new URL(req.url || "/", "http://localhost").toString();
     const headers = new Headers();
-    for (const key of Object.keys(req.headers)) {
+    for (const key of Object.keys(req.headers || {})) {
       const val = req.headers[key];
       if (val != null) headers.set(key, Array.isArray(val) ? val.join(", ") : String(val));
     }
     let body;
     if (req.method !== "GET" && req.method !== "HEAD") {
+      const contentLength = Number(req.headers?.["content-length"] || 0);
+      if (contentLength > MAX_BODY_BYTES) {
+        res.statusCode = 413;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end("\u8BF7\u6C42\u4F53\u8FC7\u5927");
+        return;
+      }
       body = await new Promise((resolve, reject) => {
         const chunks = [];
-        req.on("data", (c) => chunks.push(c));
+        let total = 0;
+        req.on("data", (chunk) => {
+          total += chunk.byteLength;
+          if (total > MAX_BODY_BYTES) {
+            reject(new Error("request body too large"));
+            req.destroy?.();
+            return;
+          }
+          chunks.push(chunk);
+        });
         req.on("error", reject);
         req.on("end", () => {
-          const len = chunks.reduce((s, c) => s + c.length, 0);
-          const merged = new Uint8Array(len);
-          let off = 0;
-          for (const c of chunks) {
-            merged.set(c, off);
-            off += c.length;
+          const merged = new Uint8Array(total);
+          let offset = 0;
+          for (const chunk of chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.byteLength;
           }
           resolve(merged);
         });
@@ -5295,17 +5004,13 @@ ${err.stack || ""}`);
     const webRes = await app2.fetch(webReq);
     res.statusCode = webRes.status;
     webRes.headers.forEach((v, k) => res.setHeader(k, v));
-    if (webRes.body) {
-      res.end(new Uint8Array(await webRes.arrayBuffer()));
-    } else {
-      res.end();
-    }
+    if (webRes.body) res.end(new Uint8Array(await webRes.arrayBuffer()));
+    else res.end();
   } catch (err) {
+    console.error("Vercel request failed:", err?.message);
     res.statusCode = 500;
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.end(`Prism Error: ${err.message}
-
-${err.stack || ""}`);
+    res.end("Prism \u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528");
   }
 }
 export {

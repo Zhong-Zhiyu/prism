@@ -41,7 +41,7 @@ npm install
 npx vercel deploy --prod
 ```
 
-无需构建步骤——预构建的 `api/index.js` 已包含在仓库中。
+Vercel 会在部署时运行 `npm run build:vercel` 构建 `api/index.js`；你也可以在本地运行同一命令来验证构建。
 
 ## 本地开发
 

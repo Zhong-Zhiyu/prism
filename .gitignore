@@ -10,3 +10,6 @@ dist/
 # 环境变量
 .env
 .env.*
+
+# 测试临时输出
+.tmp-tests/

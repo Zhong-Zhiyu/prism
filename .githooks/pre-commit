@@ -1,3 +1,6 @@
 #!/bin/sh
+set -eu
 npm run build:vercel
+npm run build
+npx tsc --noEmit
 git add api/index.js

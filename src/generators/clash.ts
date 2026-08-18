@@ -4,6 +4,7 @@
 
 import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams } from '../utils/types';
 import { expandPlaceholderProxies } from '../parsers/ini-parser';
+import { mapNodeReference, prepareNodes } from '../utils/node-utils';
 
 /**
  * 生成 Clash 格式的 YAML 配置
@@ -21,19 +22,10 @@ export function generateClashConfig(
   lines.push('# ====================================');
   lines.push('');
 
-  // 预计算过滤后的节点列表（proxy-groups 展开需要，独立于段顺序）
-  let allNodes = applyNodeFilters(sourceConfig.proxies, params);
-  if (params.rename) allNodes = applyRenames(allNodes, params.rename);
-  const seen = new Set<string>();
-  allNodes = allNodes.filter(n => {
-    const k = n.name;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  const allNodeNames = allNodes.map(n => getNodeDisplayName(n, params));
-  // 原始名 → 显示名 映射（保留原始 proxy-groups 时用于匹配）
-  const nodeNameMap = new Map(allNodes.map((n, i) => [n.name, allNodeNames[i]]));
+  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const allNodes = prepared.nodes;
+  const allNodeNames = prepared.allNames;
+  const nodeNameMap = prepared.displayNames;
 
   // 按原始顺序迭代，遇到保留段直接内联输出
   const RESERVED_KEYS = new Set(['proxies', 'proxy-groups', 'rules', 'dns', 'hosts']);
@@ -80,10 +72,13 @@ export function generateClashConfig(
       if (iniConfig.rulesetEntries.length > 0) {
         if (params.expand !== false) {
           lines.push('rules:');
+          if (!iniConfig.overwriteOriginalRules && Array.isArray(value)) {
+            for (const rule of value as string[]) lines.push(`  - ${formatRule(rule)}`);
+          }
           for (const entry of iniConfig.rulesetEntries) {
             if (entry.isSpecial) {
               if (entry.specialType === 'GEOIP') {
-                lines.push(`  - GEOSITE,${entry.specialValue},${entry.groupName}`);
+                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
               } else if (entry.specialType === 'FINAL') {
                 lines.push(`  - MATCH,${entry.groupName}`);
               }
@@ -116,7 +111,7 @@ export function generateClashConfig(
               lines.push(`  ${pn}:`);
               lines.push(`    type: http`);
               lines.push(`    behavior: domain`);
-              lines.push(`    url: "${entry.url}"`);
+              lines.push(`    url: "${esc(entry.url)}"`);
               lines.push(`    interval: 86400`);
             }
           }
@@ -124,7 +119,7 @@ export function generateClashConfig(
           for (const entry of iniConfig.rulesetEntries) {
             if (entry.isSpecial) {
               if (entry.specialType === 'GEOIP') {
-                lines.push(`  - GEOSITE,${entry.specialValue},${entry.groupName}`);
+                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
               } else if (entry.specialType === 'FINAL') {
                 lines.push(`  - MATCH,${entry.groupName}`);
               }
@@ -176,13 +171,8 @@ export function generateClashConfig(
 
 // ---- helper functions ----
 
-function getNodeDisplayName(node: ProxyNode, params: ConversionParams): string {
-  let name = node.name;
-  if (params.emoji === false) {
-    name = name.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').trim();
-  }
-  if (params.append_type) name = `[${node.type.toUpperCase()}] ${name}`;
-  return name;
+function getNodeDisplayName(node: ProxyNode, _params: ConversionParams): string {
+  return node.name;
 }
 
 function formatClashProxy(node: ProxyNode, params: ConversionParams): string {
@@ -196,13 +186,13 @@ function formatClashProxy(node: ProxyNode, params: ConversionParams): string {
 
   if (node.cipher) kv.push(`cipher: ${node.cipher}`);
   if (node.password) kv.push(`password: "${esc(node.password)}"`);
-  if (node.uuid) kv.push(`uuid: "${node.uuid}"`);
+  if (node.uuid) kv.push(`uuid: "${esc(String(node.uuid))}"`);
 
   if (node.plugin) {
     kv.push(`plugin: ${node.plugin}`);
     if (node['plugin-opts']) {
-      const opts = Object.entries(node['plugin-opts'] as Record<string,string>)
-        .map(([k, v]) => `${safeKey(k)}: "${esc(v)}"`).join(', ');
+        const opts = Object.entries(node['plugin-opts'] as Record<string, unknown>)
+        .map(([k, v]) => `${safeKey(k)}: "${esc(String(v))}"`).join(', ');
       kv.push(`plugin-opts: {${opts}}`);
     }
   }

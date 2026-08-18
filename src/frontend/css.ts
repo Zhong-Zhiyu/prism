@@ -314,7 +314,7 @@ export const HEAD = `<!DOCTYPE html>
                 opacity 0.3s ease;
   }
   #advanced.show {
-    max-height: 400px;
+    max-height: 1200px;
     opacity: 1;
   }
   .toggle-params {
@@ -339,7 +339,13 @@ export const HEAD = `<!DOCTYPE html>
   [dir="rtl"] .lang-trigger { padding: 0 10px 0 28px; }
   [dir="rtl"] .custom-select-arrow { right: auto; left: 12px; }
   [dir="rtl"] input, [dir="rtl"] textarea { direction: rtl; text-align: right; }
-  [dir="rtl"] #url, [dir="rtl"] #config-custom, [dir="rtl"] #result-url { direction: ltr; text-align: left; }
+  [dir="rtl"] .url-input, [dir="rtl"] #config-custom, [dir="rtl"] #result-url,
+  [dir="rtl"] #ua, [dir="rtl"] #include, [dir="rtl"] #exclude, [dir="rtl"] #rename {
+    direction: ltr; text-align: left; unicode-bidi: plaintext;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
 </style>
 </head>
 `;

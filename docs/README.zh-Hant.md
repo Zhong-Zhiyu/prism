@@ -41,7 +41,7 @@ npm install
 npx vercel deploy --prod
 ```
 
-無需構建步驟——預構建的 `api/index.js` 已包含在倉庫中。
+Vercel 會在部署時執行 `npm run build:vercel` 建置 `api/index.js`；你也可以在本機執行相同指令來驗證建置。
 
 ## 本地開發
 

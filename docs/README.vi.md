@@ -41,7 +41,7 @@ npm install
 npx vercel deploy --prod
 ```
 
-Không cần bước build — `api/index.js` đã được build sẵn trong kho lưu trữ.
+Vercel sẽ chạy `npm run build:vercel` trong quá trình triển khai để build `api/index.js`; bạn cũng có thể chạy lệnh này cục bộ để kiểm tra quá trình build.
 
 ## Phát triển cục bộ
 

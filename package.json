@@ -10,7 +10,12 @@
     "build": "esbuild src/worker.ts --bundle --outfile=dist/worker.js --format=esm --target=es2022",
     "build:vercel": "esbuild src/vercel.ts --bundle --outfile=api/index.js --format=esm --platform=node --target=node18 --external:'hono/*' --external:js-yaml",
     "dev:vercel": "node scripts/dev-vercel.js",
+    "test": "rm -rf .tmp-tests && mkdir -p .tmp-tests && esbuild test/core.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/core.test.mjs && node --test .tmp-tests/core.test.mjs",
+    "check": "npm run test && npx tsc --noEmit && npm run build && npm run build:vercel",
     "prepare": "git config core.hooksPath .githooks"
+  },
+  "engines": {
+    "node": ">=18.17"
   },
   "dependencies": {
     "hono": "^4.0.0",

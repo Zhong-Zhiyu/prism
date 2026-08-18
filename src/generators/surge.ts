@@ -5,6 +5,7 @@
 
 import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams } from '../utils/types';
 import { expandPlaceholderProxies } from '../parsers/ini-parser';
+import { mapNodeReference, parseClashRule, prepareNodes } from '../utils/node-utils';
 
 /**
  * 生成 Surge INI 格式的配置
@@ -35,7 +36,9 @@ export function generateSurgeConfig(
 
   // ---- Proxy 节点 ----
   lines.push('[Proxy]');
-  const allNodes = applySurgeNodeFilters(sourceConfig.proxies, params);
+  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const allNodes = prepared.nodes;
+  const nodeNameMap = prepared.displayNames;
 
   for (const node of allNodes) {
     const surgeProxy = convertNodeToSurgeProxy(node, params);
@@ -46,17 +49,17 @@ export function generateSurgeConfig(
   lines.push('');
 
   // ---- Proxy Group 策略组 ----
-  const allNodeNames = allNodes.map(n => n.name);
+  const allNodeNames = prepared.allNames;
 
   if (params.config && iniConfig.customProxyGroups.length > 0) {
     const groups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
     lines.push('[Proxy Group]');
     for (const group of groups) {
       const groupType = mapSurgeGroupType(group.groupType);
-      const validProxies = group.proxies.filter(p =>
-        p === 'DIRECT' || p === 'REJECT' || p === 'REJECT-TLS' ||
-        allNodeNames.includes(p) || groups.some(g => g.name === p)
-      );
+      const validProxies = group.proxies
+        .filter(p => p === 'DIRECT' || p === 'REJECT' || p === 'REJECT-TLS' ||
+          allNodeNames.includes(p) || nodeNameMap.has(p) || groups.some(g => g.name === p))
+        .map(p => mapNodeReference(p, nodeNameMap));
       const proxyStr = validProxies.join(', ');
       if ((group.groupType === 'url-test' || group.groupType === 'fallback') && group.url) {
         lines.push(`${group.name} = ${groupType}, ${proxyStr}, url = ${group.url}, interval = ${group.interval || 300}`);
@@ -70,7 +73,7 @@ export function generateSurgeConfig(
     lines.push('[Proxy Group]');
     for (const group of sourceConfig['proxy-groups']) {
       const groupType = mapSurgeGroupType(group.type || 'select');
-      const proxies = (group.proxies || []).join(', ');
+      const proxies = (group.proxies || []).map(proxy => mapNodeReference(proxy, nodeNameMap)).join(', ');
       if (!proxies) continue;
       lines.push(`${group.name} = ${groupType}, ${proxies}`);
     }
@@ -108,9 +111,9 @@ export function generateSurgeConfig(
       if (!rule || rule.startsWith('#')) continue;
       const converted = convertRuleToSurge(rule);
       if (converted) {
-        const parts = rule.split(',');
-        const target = parts.length >= 2 ? parts[parts.length - 1].trim() : 'DIRECT';
-        lines.push(`${converted},${target}`);
+        const parsedRule = parseClashRule(rule);
+        const target = parsedRule?.target || 'DIRECT';
+        lines.push(`${converted},${mapNodeReference(target, nodeNameMap)}`);
       }
     }
     lines.push('');
@@ -158,16 +161,8 @@ function applySurgeNodeFilters(nodes: ProxyNode[], params: ConversionParams): Pr
  * 对于 VMess: name = vmess, server, port, username=UUID, ws=true, ...
  */
 function convertNodeToSurgeProxy(node: ProxyNode, params: ConversionParams): string | null {
-  let displayName = node.name;
-  if (params.emoji === false) {
-    displayName = displayName.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').trim();
-  }
-  if (params.append_type) {
-    displayName = `[${node.type.toUpperCase()}] ${displayName}`;
-  }
-
   // 转义名称中的逗号和等号
-  const safeName = displayName.replace(/[,=]/g, '\\$&');
+  const safeName = node.name.replace(/[,=]/g, '\\$&');
 
   switch (node.type) {
     case 'ss': {
@@ -244,11 +239,11 @@ function mapSurgeGroupType(groupType: string): string {
  * 转换 Clash 规则为 Surge 规则
  */
 function convertRuleToSurge(rule: string): string | null {
-  const parts = rule.split(',');
-  if (parts.length < 2) return null;
+  const parsed = parseClashRule(rule);
+  if (!parsed) return null;
 
-  const ruleType = parts[0].trim().toUpperCase();
-  const value = parts.slice(1).join(',').trim();
+  const ruleType = parsed.type;
+  const value = parsed.value;
 
   switch (ruleType) {
     case 'DOMAIN-SUFFIX':

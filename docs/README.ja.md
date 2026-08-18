@@ -41,7 +41,7 @@ npm install
 npx vercel deploy --prod
 ```
 
-ビルド手順は不要です——事前ビルド済みの `api/index.js` がリポジトリに含まれています。
+Vercel はデプロイ時に `npm run build:vercel` を実行して `api/index.js` をビルドします。ローカルで同じコマンドを実行してビルドを確認することもできます。
 
 ## ローカル開発
 
