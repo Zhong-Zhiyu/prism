@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseClashYaml } from '../src/parsers/yaml-parser';
 import { parseClashRule, prepareNodes } from '../src/utils/node-utils';
+import { parseVergeTagFromLocation } from '../src/worker';
 import type { ConversionParams } from '../src/utils/types';
 
 test('parses block-style Clash proxies and groups', () => {
@@ -45,4 +46,21 @@ test('maps renamed and decorated node references', () => {
   }], params);
   assert.equal(prepared.allNames[0], '[SS] Hong Kong');
   assert.equal(prepared.displayNames.get('🇭🇰 HK'), '[SS] Hong Kong');
+});
+
+test('extracts Clash Verge tag from GitHub redirect location', () => {
+  const base = 'https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/';
+  assert.equal(parseVergeTagFromLocation(`${base}v3.0.0`), 'v3.0.0');
+  assert.equal(parseVergeTagFromLocation(`${base}v2.4.2`), 'v2.4.2');
+  assert.equal(parseVergeTagFromLocation(`${base}v2.5.2`), 'v2.5.2');
+});
+
+test('rejects malformed Clash Verge redirect locations', () => {
+  assert.equal(parseVergeTagFromLocation(''), null);
+  assert.equal(parseVergeTagFromLocation('https://github.com/clash-verge-rev/clash-verge-rev/releases'), null);
+  assert.equal(parseVergeTagFromLocation('https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/'), null);
+  assert.equal(parseVergeTagFromLocation('https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/latest'), null);
+  assert.equal(parseVergeTagFromLocation('https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/v2.4.2-beta.1'), null);
+  assert.equal(parseVergeTagFromLocation('https://evil.com/tag/v9.9.9\r\nInjected: 1'), null);
+  assert.equal(parseVergeTagFromLocation('https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/v2.4.2/extra'), null);
 });

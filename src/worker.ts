@@ -26,7 +26,11 @@ const MAX_CONFIG_BYTES = 512 * 1024;
 const MAX_RULESET_BYTES = 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
-const SAFE_FETCH_HEADERS = { 'User-Agent': 'clash-verge/v2.4.2' };
+const FALLBACK_UA = 'clash-verge/v2.5.2';
+const VERGE_LATEST_RELEASE_URL = 'https://github.com/clash-verge-rev/clash-verge-rev/releases/latest';
+const VERGE_VERSION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const VERGE_VERSION_FAILURE_TTL_MS = 10 * 60 * 1000;
+const VERGE_VERSION_TIMEOUT_MS = 5_000;
 
 // ============================================================
 // 路由：前端页面
@@ -67,7 +71,7 @@ app.get('/sub', async (c: Context) => {
     try {
       const results: ClashConfig[] = [];
       for (let index = 0; index < urls.length; index++) {
-        const response = await fetchTextSafe(urls[index], buildUpstreamHeaders(c), MAX_SUBSCRIPTION_BYTES);
+        const response = await fetchTextSafe(urls[index], await buildUpstreamHeaders(c), MAX_SUBSCRIPTION_BYTES);
         if (!response.ok) {
           throw new Error(`订阅 ${index + 1} 返回 HTTP ${response.status}`);
         }
@@ -90,7 +94,7 @@ app.get('/sub', async (c: Context) => {
 
     if (params.config) {
       try {
-        const configResponse = await fetchTextSafe(params.config, buildUpstreamHeaders(c), MAX_CONFIG_BYTES);
+        const configResponse = await fetchTextSafe(params.config, await buildUpstreamHeaders(c), MAX_CONFIG_BYTES);
         if (!configResponse.ok) {
           return errorResponse(c, '错误：无法下载规则配置', 502);
         }
@@ -101,7 +105,7 @@ app.get('/sub', async (c: Context) => {
           .slice(0, MAX_RULESET_URLS);
         const results = await mapWithConcurrency(entries, 3, async (entry: RulesetEntry) => {
           try {
-            const ruleResponse = await fetchTextSafe(entry.url, buildUpstreamHeaders(c), MAX_RULESET_BYTES);
+            const ruleResponse = await fetchTextSafe(entry.url, await buildUpstreamHeaders(c), MAX_RULESET_BYTES);
             if (!ruleResponse.ok) return { url: entry.url, lines: [] as string[] };
             return {
               url: entry.url,
@@ -212,11 +216,60 @@ function getSourceUrls(c: Context): string[] {
   return [];
 }
 
-function buildUpstreamHeaders(c: Context): Record<string, string> {
+async function buildUpstreamHeaders(c: Context): Promise<Record<string, string>> {
   const q = c.req.query() as Record<string, string>;
   const requested = (q.ua || '').trim();
-  const ua = requested || SAFE_FETCH_HEADERS['User-Agent'];
+  const ua = requested || (await resolveDefaultUa());
   return { 'User-Agent': ua };
+}
+
+// 模块级缓存：成功缓存 6 小时；失败短时间内直接回落，避免 GitHub 故障时每个请求都等待超时。
+let vergeVersionCache: { ua: string; expires: number } | null = null;
+let vergeVersionInFlight: Promise<string> | null = null;
+
+async function resolveDefaultUa(): Promise<string> {
+  if (vergeVersionCache && vergeVersionCache.expires > Date.now()) return vergeVersionCache.ua;
+  if (!vergeVersionInFlight) {
+    vergeVersionInFlight = fetchLatestVergeTag()
+      .then(tag => {
+        vergeVersionCache = { ua: `clash-verge/${tag}`, expires: Date.now() + VERGE_VERSION_CACHE_TTL_MS };
+        return vergeVersionCache.ua;
+      })
+      .catch(err => {
+        console.error('获取 Clash Verge 最新版本失败，使用回退 UA:', (err as Error).message);
+        vergeVersionCache = { ua: FALLBACK_UA, expires: Date.now() + VERGE_VERSION_FAILURE_TTL_MS };
+        return FALLBACK_UA;
+      })
+      .finally(() => { vergeVersionInFlight = null; });
+  }
+  return vergeVersionInFlight;
+}
+
+// 走 releases/latest 的 302 重定向取版本号，而非 api.github.com（未认证 API 有 60 次/小时/IP 限额，
+// 在 Workers/Vercel 共享出口 IP 上极易触发）。
+async function fetchLatestVergeTag(): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERGE_VERSION_TIMEOUT_MS);
+  try {
+    const response = await fetch(VERGE_LATEST_RELEASE_URL, {
+      headers: { 'User-Agent': FALLBACK_UA },
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (response.status < 300 || response.status >= 400) {
+      throw new Error(`GitHub 返回意外状态码 ${response.status}`);
+    }
+    const tag = parseVergeTagFromLocation(response.headers.get('location') || '');
+    if (!tag) throw new Error('无法从重定向地址解析版本号');
+    return tag;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function parseVergeTagFromLocation(location: string): string | null {
+  const match = location.match(/\/tag\/(v\d+(?:\.\d+){0,3})$/);
+  return match ? match[1] : null;
 }
 
 function validateParams(params: ConversionParams): string | null {

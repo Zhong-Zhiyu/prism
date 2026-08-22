@@ -3719,7 +3719,7 @@ var init_body2 = __esm({
         </div>
       </div>      <div class="form-group">
         <label data-i18n="labelUa">\u81EA\u5B9A\u4E49 User-Agent\uFF08\u53EF\u9009\uFF09</label>
-        <input type="text" id="ua" data-i18n-placeholder="placeholderUa" placeholder="\u9ED8\u8BA4 clash-verge/v2.4.2">
+        <input type="text" id="ua" data-i18n-placeholder="placeholderUa" placeholder="\u9ED8\u8BA4 clash-verge/<\u6700\u65B0\u7248\u672C>">
       </div>
     </div>
 
@@ -4022,7 +4022,7 @@ var I18N = {
     btnGenerate: '\u751F\u6210\u8BA2\u9605\u94FE\u63A5', labelResult: '\u751F\u6210\u7684\u8BA2\u9605\u94FE\u63A5\uFF1A',
     btnCopy: '\u590D\u5236\u94FE\u63A5', btnDownload: '\u4E0B\u8F7D\u914D\u7F6E',
     msgEnterUrl: '\u8BF7\u8F93\u5165\u8BA2\u9605\u94FE\u63A5', msgGenerated: '\u8BA2\u9605\u94FE\u63A5\u5DF2\u751F\u6210',
-    labelRename: '\u8282\u70B9\u91CD\u547D\u540D\uFF08\u53EF\u9009\uFF09', placeholderRename: '\u5982 \u9999\u6E2F@HK|\u65E5\u672C@JP', btnAddUrl: '\u6DFB\u52A0\u8BA2\u9605\u94FE\u63A5', labelUa: '\u81EA\u5B9A\u4E49 User-Agent\uFF08\u53EF\u9009\uFF09', placeholderUa: '\u9ED8\u8BA4 clash-verge/v2.4.2',
+    labelRename: '\u8282\u70B9\u91CD\u547D\u540D\uFF08\u53EF\u9009\uFF09', placeholderRename: '\u5982 \u9999\u6E2F@HK|\u65E5\u672C@JP', btnAddUrl: '\u6DFB\u52A0\u8BA2\u9605\u94FE\u63A5', labelUa: '\u81EA\u5B9A\u4E49 User-Agent\uFF08\u53EF\u9009\uFF09', placeholderUa: '\u9ED8\u8BA4 clash-verge/<\u6700\u65B0\u7248\u672C>',
     msgCopied: '\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F', msgDownloadStarted: '\u4E0B\u8F7D\u5DF2\u5F00\u59CB', msgDownloadFailed: '\u4E0B\u8F7D\u5931\u8D25',
   },
   'en': {
@@ -4041,7 +4041,7 @@ var I18N = {
     btnGenerate: 'Generate Subscription', labelResult: 'Subscription URL:',
     btnCopy: 'Copy URL', btnDownload: 'Download Config',
     msgEnterUrl: 'Please enter a subscription URL', msgGenerated: 'Subscription URL generated',
-    labelRename: 'Rename Nodes (optional)', placeholderRename: 'e.g. HK@HongKong|JP@Japan', btnAddUrl: 'Add Subscription', labelUa: 'Custom User-Agent (optional)', placeholderUa: 'Default: clash-verge/v2.4.2',
+    labelRename: 'Rename Nodes (optional)', placeholderRename: 'e.g. HK@HongKong|JP@Japan', btnAddUrl: 'Add Subscription', labelUa: 'Custom User-Agent (optional)', placeholderUa: 'Default: clash-verge/<latest>',
     msgCopied: 'Copied to clipboard', msgDownloadStarted: 'Download started', msgDownloadFailed: 'Download failed',
   },
   'ar': {
@@ -4061,7 +4061,7 @@ var I18N = {
     btnGenerate: '\u0625\u0646\u0634\u0627\u0621 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643', labelResult: '\u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643:',
     btnCopy: '\u0646\u0633\u062E \u0627\u0644\u0631\u0627\u0628\u0637', btnDownload: '\u062A\u0646\u0632\u064A\u0644 \u0627\u0644\u062A\u0643\u0648\u064A\u0646',
     msgEnterUrl: '\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643', msgGenerated: '\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643',
-    labelRename: '\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0639\u0642\u062F (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0625\u0636\u0627\u0641\u0629 \u0627\u0634\u062A\u0631\u0627\u0643', labelUa: 'User-Agent \u0645\u062E\u0635\u0635 (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderUa: '\u0627\u0644\u0627\u0641\u062A\u0631\u0627\u0636\u064A: clash-verge/v2.4.2',
+    labelRename: '\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0639\u0642\u062F (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0625\u0636\u0627\u0641\u0629 \u0627\u0634\u062A\u0631\u0627\u0643', labelUa: 'User-Agent \u0645\u062E\u0635\u0635 (\u0627\u062E\u062A\u064A\u0627\u0631\u064A)', placeholderUa: '\u0627\u0644\u0627\u0641\u062A\u0631\u0627\u0636\u064A: clash-verge/<\u0627\u0644\u0623\u062D\u062F\u062B>',
     msgCopied: '\u062A\u0645 \u0627\u0644\u0646\u0633\u062E \u0625\u0644\u0649 \u0627\u0644\u062D\u0627\u0641\u0638\u0629', msgDownloadStarted: '\u0628\u062F\u0623 \u0627\u0644\u062A\u0646\u0632\u064A\u0644', msgDownloadFailed: '\u0641\u0634\u0644 \u0627\u0644\u062A\u0646\u0632\u064A\u0644',
   },
   'zh-Hant': {
@@ -4080,7 +4080,7 @@ var I18N = {
     btnGenerate: '\u751F\u6210\u8A02\u95B1\u9023\u7D50', labelResult: '\u751F\u6210\u7684\u8A02\u95B1\u9023\u7D50\uFF1A',
     btnCopy: '\u8907\u88FD\u9023\u7D50', btnDownload: '\u4E0B\u8F09\u8A2D\u5B9A\u6A94',
     msgEnterUrl: '\u8ACB\u8F38\u5165\u8A02\u95B1\u9023\u7D50', msgGenerated: '\u8A02\u95B1\u9023\u7D50\u5DF2\u751F\u6210',
-    labelRename: '\u7BC0\u9EDE\u91CD\u547D\u540D\uFF08\u53EF\u9078\uFF09', placeholderRename: '\u5982 HK@HongKong|JP@Japan', btnAddUrl: '\u65B0\u589E\u8A02\u95B1\u9023\u7D50', labelUa: '\u81EA\u8A02 User-Agent\uFF08\u53EF\u9078\uFF09', placeholderUa: '\u9810\u8A2D clash-verge/v2.4.2',
+    labelRename: '\u7BC0\u9EDE\u91CD\u547D\u540D\uFF08\u53EF\u9078\uFF09', placeholderRename: '\u5982 HK@HongKong|JP@Japan', btnAddUrl: '\u65B0\u589E\u8A02\u95B1\u9023\u7D50', labelUa: '\u81EA\u8A02 User-Agent\uFF08\u53EF\u9078\uFF09', placeholderUa: '\u9810\u8A2D clash-verge/<\u6700\u65B0\u7248\u672C>',
     msgCopied: '\u5DF2\u8907\u88FD\u5230\u526A\u8CBC\u7C3F', msgDownloadStarted: '\u4E0B\u8F09\u5DF2\u958B\u59CB', msgDownloadFailed: '\u4E0B\u8F09\u5931\u6557',
   },
   'ja': {
@@ -4099,7 +4099,7 @@ var I18N = {
     btnGenerate: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3 URL \u3092\u751F\u6210', labelResult: '\u751F\u6210\u3055\u308C\u305F URL:',
     btnCopy: 'URL \u3092\u30B3\u30D4\u30FC', btnDownload: '\u8A2D\u5B9A\u3092\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9',
     msgEnterUrl: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3 URL \u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044', msgGenerated: 'URL \u304C\u751F\u6210\u3055\u308C\u307E\u3057\u305F',
-    labelRename: '\u30CE\u30FC\u30C9\u540D\u5909\u66F4\uFF08\u4EFB\u610F\uFF09', placeholderRename: '\u4F8B: HK@HongKong|JP@Japan', btnAddUrl: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3\u3092\u8FFD\u52A0', labelUa: '\u30AB\u30B9\u30BF\u30E0 User-Agent\uFF08\u4EFB\u610F\uFF09', placeholderUa: '\u30C7\u30D5\u30A9\u30EB\u30C8: clash-verge/v2.4.2',
+    labelRename: '\u30CE\u30FC\u30C9\u540D\u5909\u66F4\uFF08\u4EFB\u610F\uFF09', placeholderRename: '\u4F8B: HK@HongKong|JP@Japan', btnAddUrl: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3\u3092\u8FFD\u52A0', labelUa: '\u30AB\u30B9\u30BF\u30E0 User-Agent\uFF08\u4EFB\u610F\uFF09', placeholderUa: '\u30C7\u30D5\u30A9\u30EB\u30C8: clash-verge/<\u6700\u65B0\u7248>',
     msgCopied: '\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F', msgDownloadStarted: '\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F', msgDownloadFailed: '\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9\u306B\u5931\u6557\u3057\u307E\u3057\u305F',
   },
   'ko': {
@@ -4118,7 +4118,7 @@ var I18N = {
     btnGenerate: '\uAD6C\uB3C5 \uB9C1\uD06C \uC0DD\uC131', labelResult: '\uC0DD\uC131\uB41C \uAD6C\uB3C5 URL:',
     btnCopy: 'URL \uBCF5\uC0AC', btnDownload: '\uC124\uC815 \uB2E4\uC6B4\uB85C\uB4DC',
     msgEnterUrl: '\uAD6C\uB3C5 URL\uC744 \uC785\uB825\uD558\uC138\uC694', msgGenerated: '\uAD6C\uB3C5 URL\uC774 \uC0DD\uC131\uB418\uC5C8\uC2B5\uB2C8\uB2E4',
-    labelRename: '\uB178\uB4DC \uC774\uB984 \uBCC0\uACBD (\uC120\uD0DD\uC0AC\uD56D)', placeholderRename: '\uC608: HK@HongKong|JP@Japan', btnAddUrl: '\uAD6C\uB3C5 \uCD94\uAC00', labelUa: '\uC0AC\uC6A9\uC790 \uC9C0\uC815 User-Agent (\uC120\uD0DD\uC0AC\uD56D)', placeholderUa: '\uAE30\uBCF8\uAC12: clash-verge/v2.4.2',
+    labelRename: '\uB178\uB4DC \uC774\uB984 \uBCC0\uACBD (\uC120\uD0DD\uC0AC\uD56D)', placeholderRename: '\uC608: HK@HongKong|JP@Japan', btnAddUrl: '\uAD6C\uB3C5 \uCD94\uAC00', labelUa: '\uC0AC\uC6A9\uC790 \uC9C0\uC815 User-Agent (\uC120\uD0DD\uC0AC\uD56D)', placeholderUa: '\uAE30\uBCF8\uAC12: clash-verge/<\uCD5C\uC2E0>',
     msgCopied: '\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uB418\uC5C8\uC2B5\uB2C8\uB2E4', msgDownloadStarted: '\uB2E4\uC6B4\uB85C\uB4DC\uAC00 \uC2DC\uC791\uB418\uC5C8\uC2B5\uB2C8\uB2E4', msgDownloadFailed: '\uB2E4\uC6B4\uB85C\uB4DC \uC2E4\uD328',
   },
   'ru': {
@@ -4137,7 +4137,7 @@ var I18N = {
     btnGenerate: '\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443', labelResult: '\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 URL \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438:',
     btnCopy: '\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C URL', btnDownload: '\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E',
     msgEnterUrl: '\u0412\u0432\u0435\u0434\u0438\u0442\u0435 URL \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438', msgGenerated: '\u0421\u0441\u044B\u043B\u043A\u0430 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0430',
-    labelRename: '\u041F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C \u0443\u0437\u043B\u044B (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderRename: '\u043D\u0430\u043F\u0440. HK@HongKong|JP@Japan', btnAddUrl: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0443', labelUa: '\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0441\u043A\u0438\u0439 User-Agent (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderUa: '\u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E: clash-verge/v2.4.2',
+    labelRename: '\u041F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C \u0443\u0437\u043B\u044B (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderRename: '\u043D\u0430\u043F\u0440. HK@HongKong|JP@Japan', btnAddUrl: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0443', labelUa: '\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0441\u043A\u0438\u0439 User-Agent (\u043D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E)', placeholderUa: '\u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E: clash-verge/<\u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044F\u044F>',
     msgCopied: '\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043E \u0432 \u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430', msgDownloadStarted: '\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043D\u0430\u0447\u0430\u043B\u0430\u0441\u044C', msgDownloadFailed: '\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438',
   },
   'vi': {
@@ -4156,7 +4156,7 @@ var I18N = {
     btnGenerate: 'T\u1EA1o li\xEAn k\u1EBFt \u0111\u0103ng k\xFD', labelResult: 'URL \u0111\u0103ng k\xFD \u0111\xE3 t\u1EA1o:',
     btnCopy: 'Sao ch\xE9p URL', btnDownload: 'T\u1EA3i v\u1EC1 c\u1EA5u h\xECnh',
     msgEnterUrl: 'Vui l\xF2ng nh\u1EADp URL \u0111\u0103ng k\xFD', msgGenerated: '\u0110\xE3 t\u1EA1o URL \u0111\u0103ng k\xFD',
-    labelRename: '\u0110\u1ED5i t\xEAn n\xFAt (t\xF9y ch\u1ECDn)', placeholderRename: 'vd: HK@HongKong|JP@Japan', btnAddUrl: 'Th\xEAm \u0111\u0103ng k\xFD', labelUa: 'User-Agent t\xF9y ch\u1EC9nh (t\xF9y ch\u1ECDn)', placeholderUa: 'M\u1EB7c \u0111\u1ECBnh: clash-verge/v2.4.2',
+    labelRename: '\u0110\u1ED5i t\xEAn n\xFAt (t\xF9y ch\u1ECDn)', placeholderRename: 'vd: HK@HongKong|JP@Japan', btnAddUrl: 'Th\xEAm \u0111\u0103ng k\xFD', labelUa: 'User-Agent t\xF9y ch\u1EC9nh (t\xF9y ch\u1ECDn)', placeholderUa: 'M\u1EB7c \u0111\u1ECBnh: clash-verge/<m\u1EDBi nh\u1EA5t>',
     msgCopied: '\u0110\xE3 sao ch\xE9p v\xE0o clipboard', msgDownloadStarted: 'B\u1EAFt \u0111\u1EA7u t\u1EA3i xu\u1ED1ng', msgDownloadFailed: 'T\u1EA3i xu\u1ED1ng th\u1EA5t b\u1EA1i',
   },
   'fa': {
@@ -4175,7 +4175,7 @@ var I18N = {
     btnGenerate: '\u0627\u06CC\u062C\u0627\u062F \u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9', labelResult: '\u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0627\u06CC\u062C\u0627\u062F \u0634\u062F\u0647:',
     btnCopy: '\u06A9\u067E\u06CC URL', btnDownload: '\u062F\u0627\u0646\u0644\u0648\u062F \u067E\u06CC\u06A9\u0631\u0628\u0646\u062F\u06CC',
     msgEnterUrl: '\u0644\u0637\u0641\u0627\u064B URL \u0627\u0634\u062A\u0631\u0627\u06A9 \u0631\u0627 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F', msgGenerated: '\u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0627\u06CC\u062C\u0627\u062F \u0634\u062F',
-    labelRename: '\u062A\u063A\u06CC\u06CC\u0631 \u0646\u0627\u0645 \u0633\u0631\u0648\u0631 (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0627\u0641\u0632\u0648\u062F\u0646 \u0627\u0634\u062A\u0631\u0627\u06A9', labelUa: 'User-Agent \u0633\u0641\u0627\u0631\u0634\u06CC (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderUa: '\u067E\u06CC\u0634\u200C\u0641\u0631\u0636: clash-verge/v2.4.2',
+    labelRename: '\u062A\u063A\u06CC\u06CC\u0631 \u0646\u0627\u0645 \u0633\u0631\u0648\u0631 (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderRename: '\u0645\u062B\u0627\u0644: HK@HongKong|JP@Japan', btnAddUrl: '\u0627\u0641\u0632\u0648\u062F\u0646 \u0627\u0634\u062A\u0631\u0627\u06A9', labelUa: 'User-Agent \u0633\u0641\u0627\u0631\u0634\u06CC (\u0627\u062E\u062A\u06CC\u0627\u0631\u06CC)', placeholderUa: '\u067E\u06CC\u0634\u200C\u0641\u0631\u0636: clash-verge/<\u0622\u062E\u0631\u06CC\u0646>',
     msgCopied: '\u062F\u0631 \u06A9\u0644\u06CC\u067E\u200C\u0628\u0648\u0631\u062F \u06A9\u067E\u06CC \u0634\u062F', msgDownloadStarted: '\u062F\u0627\u0646\u0644\u0648\u062F \u0622\u063A\u0627\u0632 \u0634\u062F', msgDownloadFailed: '\u062F\u0627\u0646\u0644\u0648\u062F \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F',
   },
 
@@ -4588,7 +4588,8 @@ var init_frontend = __esm({
 // src/worker.ts
 var worker_exports = {};
 __export(worker_exports, {
-  default: () => worker_default
+  default: () => worker_default,
+  parseVergeTagFromLocation: () => parseVergeTagFromLocation
 });
 import { getCookie } from "hono/cookie";
 function parseQueryParams(c) {
@@ -4623,11 +4624,50 @@ function getSourceUrls(c) {
   }
   return [];
 }
-function buildUpstreamHeaders(c) {
+async function buildUpstreamHeaders(c) {
   const q = c.req.query();
   const requested = (q.ua || "").trim();
-  const ua = requested || SAFE_FETCH_HEADERS["User-Agent"];
+  const ua = requested || await resolveDefaultUa();
   return { "User-Agent": ua };
+}
+async function resolveDefaultUa() {
+  if (vergeVersionCache && vergeVersionCache.expires > Date.now()) return vergeVersionCache.ua;
+  if (!vergeVersionInFlight) {
+    vergeVersionInFlight = fetchLatestVergeTag().then((tag) => {
+      vergeVersionCache = { ua: `clash-verge/${tag}`, expires: Date.now() + VERGE_VERSION_CACHE_TTL_MS };
+      return vergeVersionCache.ua;
+    }).catch((err) => {
+      console.error("\u83B7\u53D6 Clash Verge \u6700\u65B0\u7248\u672C\u5931\u8D25\uFF0C\u4F7F\u7528\u56DE\u9000 UA:", err.message);
+      vergeVersionCache = { ua: FALLBACK_UA, expires: Date.now() + VERGE_VERSION_FAILURE_TTL_MS };
+      return FALLBACK_UA;
+    }).finally(() => {
+      vergeVersionInFlight = null;
+    });
+  }
+  return vergeVersionInFlight;
+}
+async function fetchLatestVergeTag() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERGE_VERSION_TIMEOUT_MS);
+  try {
+    const response = await fetch(VERGE_LATEST_RELEASE_URL, {
+      headers: { "User-Agent": FALLBACK_UA },
+      redirect: "manual",
+      signal: controller.signal
+    });
+    if (response.status < 300 || response.status >= 400) {
+      throw new Error(`GitHub \u8FD4\u56DE\u610F\u5916\u72B6\u6001\u7801 ${response.status}`);
+    }
+    const tag = parseVergeTagFromLocation(response.headers.get("location") || "");
+    if (!tag) throw new Error("\u65E0\u6CD5\u4ECE\u91CD\u5B9A\u5411\u5730\u5740\u89E3\u6790\u7248\u672C\u53F7");
+    return tag;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function parseVergeTagFromLocation(location) {
+  const match2 = location.match(/\/tag\/(v\d+(?:\.\d+){0,3})$/);
+  return match2 ? match2[1] : null;
 }
 function validateParams(params) {
   if (!["clash", "singbox", "surge"].includes(params.target)) return "\u9519\u8BEF\uFF1A\u4E0D\u652F\u6301\u7684 target \u7C7B\u578B";
@@ -4798,7 +4838,7 @@ function utf8ToBase64(str) {
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
-var app, MAX_SOURCE_URLS, MAX_RULESET_URLS, MAX_URL_LENGTH, MAX_PARAM_LENGTH, MAX_SUBSCRIPTION_BYTES, MAX_CONFIG_BYTES, MAX_RULESET_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, SAFE_FETCH_HEADERS, worker_default;
+var app, MAX_SOURCE_URLS, MAX_RULESET_URLS, MAX_URL_LENGTH, MAX_PARAM_LENGTH, MAX_SUBSCRIPTION_BYTES, MAX_CONFIG_BYTES, MAX_RULESET_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, FALLBACK_UA, VERGE_LATEST_RELEASE_URL, VERGE_VERSION_CACHE_TTL_MS, VERGE_VERSION_FAILURE_TTL_MS, VERGE_VERSION_TIMEOUT_MS, vergeVersionCache, vergeVersionInFlight, worker_default;
 var init_worker = __esm({
   "src/worker.ts"() {
     "use strict";
@@ -4820,7 +4860,11 @@ var init_worker = __esm({
     MAX_RULESET_BYTES = 1024 * 1024;
     FETCH_TIMEOUT_MS = 15e3;
     MAX_REDIRECTS = 3;
-    SAFE_FETCH_HEADERS = { "User-Agent": "clash-verge/v2.4.2" };
+    FALLBACK_UA = "clash-verge/v2.5.2";
+    VERGE_LATEST_RELEASE_URL = "https://github.com/clash-verge-rev/clash-verge-rev/releases/latest";
+    VERGE_VERSION_CACHE_TTL_MS = 6 * 60 * 60 * 1e3;
+    VERGE_VERSION_FAILURE_TTL_MS = 10 * 60 * 1e3;
+    VERGE_VERSION_TIMEOUT_MS = 5e3;
     app.get("/", (c) => {
       const theme = getCookie(c, "prism-theme");
       if (theme === "light" || theme === "dark") {
@@ -4849,7 +4893,7 @@ var init_worker = __esm({
         try {
           const results = [];
           for (let index = 0; index < urls.length; index++) {
-            const response = await fetchTextSafe(urls[index], buildUpstreamHeaders(c), MAX_SUBSCRIPTION_BYTES);
+            const response = await fetchTextSafe(urls[index], await buildUpstreamHeaders(c), MAX_SUBSCRIPTION_BYTES);
             if (!response.ok) {
               throw new Error(`\u8BA2\u9605 ${index + 1} \u8FD4\u56DE HTTP ${response.status}`);
             }
@@ -4868,7 +4912,7 @@ var init_worker = __esm({
         const ruleContents = {};
         if (params.config) {
           try {
-            const configResponse = await fetchTextSafe(params.config, buildUpstreamHeaders(c), MAX_CONFIG_BYTES);
+            const configResponse = await fetchTextSafe(params.config, await buildUpstreamHeaders(c), MAX_CONFIG_BYTES);
             if (!configResponse.ok) {
               return errorResponse(c, "\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u89C4\u5219\u914D\u7F6E", 502);
             }
@@ -4876,7 +4920,7 @@ var init_worker = __esm({
             const entries = iniConfig.rulesetEntries.filter((entry) => !entry.isSpecial && entry.url).slice(0, MAX_RULESET_URLS);
             const results = await mapWithConcurrency(entries, 3, async (entry) => {
               try {
-                const ruleResponse = await fetchTextSafe(entry.url, buildUpstreamHeaders(c), MAX_RULESET_BYTES);
+                const ruleResponse = await fetchTextSafe(entry.url, await buildUpstreamHeaders(c), MAX_RULESET_BYTES);
                 if (!ruleResponse.ok) return { url: entry.url, lines: [] };
                 return {
                   url: entry.url,
@@ -4941,6 +4985,8 @@ var init_worker = __esm({
         "Cache-Control": "no-store"
       }
     }));
+    vergeVersionCache = null;
+    vergeVersionInFlight = null;
     worker_default = app;
   }
 });
