@@ -26,7 +26,7 @@ Cross-format proxy subscription converter, deployable to Cloudflare Workers and 
 ### Option 2: Wrangler CLI
 
 ```bash
-git clone https://github.com/Motrans/prism.git
+git clone https://github.com/Zhong-Zhiyu/prism.git
 cd prism
 npm install
 npm run deploy
@@ -35,7 +35,7 @@ npm run deploy
 ### Option 3: Vercel
 
 ```bash
-git clone https://github.com/Motrans/prism.git
+git clone https://github.com/Zhong-Zhiyu/prism.git
 cd prism
 npm install
 npx vercel deploy --prod

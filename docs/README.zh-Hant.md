@@ -26,7 +26,7 @@
 ### 方式二：Wrangler CLI 部署
 
 ```bash
-git clone https://github.com/Motrans/prism.git
+git clone https://github.com/Zhong-Zhiyu/prism.git
 cd prism
 npm install
 npm run deploy
@@ -35,7 +35,7 @@ npm run deploy
 ### 方式三：Vercel 部署
 
 ```bash
-git clone https://github.com/Motrans/prism.git
+git clone https://github.com/Zhong-Zhiyu/prism.git
 cd prism
 npm install
 npx vercel deploy --prod
