@@ -6,6 +6,13 @@ import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams, Ruleset
 import { dedupeRulesetEntries, expandPlaceholderProxies } from '../parsers/ini-parser';
 import { mapNodeReference, prepareNodes } from '../utils/node-utils';
 import { expandRulesetEntries, isCidrLiteral, pruneRulesWithLog } from '../utils/rule-pruner';
+import {
+  MIHOMO_RULE_TYPES,
+  describeDroppedTypes,
+  filterSupportedRules,
+  normalizeRulesForClash,
+  totalDroppedRules,
+} from '../utils/target-support';
 
 /**
  * 生成 Clash 格式的 YAML 配置
@@ -83,10 +90,7 @@ export function generateClashConfig(
               entry => `# ⚠ 规则集下载失败: ${entry.groupName}`),
           ];
           const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
-          lines.push('rules:');
-          for (const rule of rules) {
-            lines.push(rule.startsWith('#') ? `  ${rule}` : `  - ${formatRule(rule)}`);
-          }
+          writeClashRules(lines, rules);
         } else {
           // 非展开模式：条目去重 + 首个 FINAL 之后截断，provider 名按 URL 唯一化
           const deduped = dedupeRulesetEntries(iniConfig.rulesetEntries);
@@ -116,10 +120,7 @@ export function generateClashConfig(
         }
       } else if (sourceRules.length > 0) {
         const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
-        lines.push('rules:');
-        for (const rule of rules) {
-          lines.push(rule.startsWith('#') ? `  ${rule}` : `  - ${formatRule(rule)}`);
-        }
+        writeClashRules(lines, rules);
       }
       continue;
     }
@@ -200,9 +201,13 @@ function formatClashProxy(node: ProxyNode, params: ConversionParams): string {
   if (params.tls13) skip.add('client-fingerprint');
   for (const [k, v] of Object.entries(node)) {
     if (skip.has(k)) continue;
+    if (v === undefined || v === null) continue;
     if (typeof v === 'boolean') kv.push(`${safeKey(k)}: ${v}`);
     else if (typeof v === 'number') kv.push(`${safeKey(k)}: ${v}`);
     else if (typeof v === 'string') kv.push(`${safeKey(k)}: "${esc(v)}"`);
+    // 数组 / 嵌套对象（ws-opts、reality-opts、grpc-opts 等）按 YAML 流式 JSON 输出，
+    // 否则这些传输参数会被丢弃，导致 WS / Reality 节点导出后不可用
+    else if (Array.isArray(v) || (typeof v === 'object')) kv.push(`${safeKey(k)}: ${JSON.stringify(v)}`);
   }
 
   return `  - { ${kv.join(', ')} }`;
@@ -342,6 +347,28 @@ function formatRule(rule: string): string {
     return `"${esc(rule)}"`;
   }
   return rule;
+}
+
+/**
+ * 输出 Clash / Mihomo 的 rules 段。
+ * 先归一化 FINAL → MATCH，再丢弃内核不支持的规则类型（如 URL-REGEX），
+ * 被丢弃时追加统计注释，避免整份配置因单条规则校验失败而无法启用。
+ */
+function writeClashRules(lines: string[], rules: string[]): void {
+  const normalized = normalizeRulesForClash(rules);
+  const { rules: supported, dropped } = filterSupportedRules(normalized, MIHOMO_RULE_TYPES);
+
+  lines.push('rules:');
+  for (const rule of supported) {
+    lines.push(rule.startsWith('#') ? `  ${rule}` : `  - ${formatRule(rule)}`);
+  }
+
+  const droppedCount = totalDroppedRules(dropped);
+  if (droppedCount > 0) {
+    const detail = describeDroppedTypes(dropped);
+    console.warn(`[Prism] 已跳过 ${droppedCount} 条 Clash/Mihomo 不支持的规则: ${detail}`);
+    lines.push(`  # 已跳过 ${droppedCount} 条 Clash/Mihomo 不支持的规则（${detail}）`);
+  }
 }
 
 /**

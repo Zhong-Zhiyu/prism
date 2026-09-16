@@ -22,6 +22,7 @@ const SINGBOX_TYPE_MAP: Record<string, string> = {
   socks5: 'socks',
   snell: 'snell',
   tuic: 'tuic',
+  anytls: 'anytls',
 };
 
 /**
@@ -74,6 +75,7 @@ export function generateSingboxConfig(
 
   // ---- Routes ----
   const rules: unknown[] = [];
+  let skippedRules = 0;
 
   if (params.config && iniConfig.rulesetEntries.length > 0) {
     // 展开 .* 占位符
@@ -109,6 +111,7 @@ export function generateSingboxConfig(
     for (const rule of finalRules) {
       const singboxRule = convertRuleToSingboxWithTarget(rule);
       if (singboxRule) rules.push(singboxRule);
+      else if (rule && !rule.startsWith('#')) skippedRules++;
     }
   } else {
     // 无外部 config 时，从原始订阅生成默认路由
@@ -119,7 +122,12 @@ export function generateSingboxConfig(
     for (const rule of finalRules) {
       const singboxRule = convertRuleToSingboxWithTarget(rule, nodeNameMap);
       if (singboxRule) rules.push(singboxRule);
+      else if (rule && !rule.startsWith('#')) skippedRules++;
     }
+  }
+
+  if (skippedRules > 0) {
+    console.warn(`[sing-box] 已跳过 ${skippedRules} 条无法转换的规则（如 URL-REGEX、IPSET）`);
   }
 
   if (rules.length > 0) {
@@ -134,7 +142,10 @@ export function generateSingboxConfig(
  */
 function convertNodeToSingboxOutbound(node: ProxyNode, params: ConversionParams): unknown | null {
   const singboxType = SINGBOX_TYPE_MAP[node.type];
-  if (!singboxType) return null;
+  if (!singboxType) {
+    console.warn(`[sing-box] 不支持的节点类型: ${node.type} (${node.name})，已跳过`);
+    return null;
+  }
 
   const displayName = node.name;
 
@@ -163,17 +174,33 @@ function convertNodeToSingboxOutbound(node: ProxyNode, params: ConversionParams)
     case 'vless':
       outbound.uuid = node.uuid || '';
       break;
+    case 'anytls':
+      outbound.password = node.password || '';
+      singboxTls(outbound).enabled = true;
+      break;
   }
 
   // TLS
   if (params.scv || node['skip-cert-verify']) {
-    (outbound.tls as Record<string, unknown> || (outbound.tls = {}))['insecure'] = true;
+    singboxTls(outbound).insecure = true;
   }
   if (node.sni) {
-    (outbound.tls as Record<string, unknown> || (outbound.tls = {}))['server_name'] = node.sni;
+    singboxTls(outbound).server_name = node.sni;
+  }
+  if (node.alpn) {
+    const alpn = Array.isArray(node.alpn)
+      ? node.alpn.map(value => String(value)).filter(Boolean)
+      : String(node.alpn).split(/[,;]/).map(value => value.trim()).filter(Boolean);
+    if (alpn.length > 0) singboxTls(outbound).alpn = alpn;
   }
 
   return outbound;
+}
+
+/** 取（或初始化）outbound 的 tls 段 */
+function singboxTls(outbound: Record<string, unknown>): Record<string, unknown> {
+  if (!outbound.tls || typeof outbound.tls !== 'object') outbound.tls = {};
+  return outbound.tls as Record<string, unknown>;
 }
 
 /**

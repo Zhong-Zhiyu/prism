@@ -4,10 +4,13 @@
 
 import yaml from 'js-yaml';
 import type { ClashConfig, ProxyGroup, ProxyNode } from '../utils/types';
+import { MIHOMO_PROXY_TYPES, describeDroppedTypes } from '../utils/target-support';
 
-const SUPPORTED_PROXY_TYPES = new Set([
-  'ss', 'ssr', 'vmess', 'vless', 'trojan', 'hysteria2', 'http', 'socks5', 'snell', 'tuic',
-]);
+/**
+ * 上游在客户端 UA 过旧时可能只下发占位节点，节点名通常是「只显示 / 更新客户端」这类提示。
+ * 这里仅用于日志提示，不会过滤或改写订阅内容。
+ */
+const PLACEHOLDER_NODE_PATTERN = /只显示|更新客户端|outdated client|update (?:your |the )?client/i;
 
 /**
  * 使用标准 YAML 解析器读取 Clash 配置，并拒绝不完整的代理节点。
@@ -49,6 +52,8 @@ export function parseClashYaml(content: string): ClashConfig {
 function parseProxies(value: unknown): ProxyNode[] {
   if (!Array.isArray(value)) return [];
   const proxies: ProxyNode[] = [];
+  const droppedTypes = new Map<string, number>();
+  let placeholderCount = 0;
 
   for (const item of value) {
     if (!isRecord(item)) continue;
@@ -56,12 +61,34 @@ function parseProxies(value: unknown): ProxyNode[] {
     const type = item.type;
     const server = item.server;
     const port = item.port;
-    if (typeof name !== 'string' || !name.trim() || typeof type !== 'string' ||
-      !SUPPORTED_PROXY_TYPES.has(type.toLowerCase()) || typeof server !== 'string' ||
+    const normalizedType = typeof type === 'string' ? type.trim().toLowerCase() : '';
+    if (typeof name !== 'string' || !name.trim() ||
+      !normalizedType || !MIHOMO_PROXY_TYPES.has(normalizedType) || typeof server !== 'string' ||
       !server.trim() || !Number.isInteger(port) || port < 1 || port > 65535) {
+      if (normalizedType && !MIHOMO_PROXY_TYPES.has(normalizedType)) {
+        droppedTypes.set(normalizedType, (droppedTypes.get(normalizedType) ?? 0) + 1);
+      }
       continue;
     }
-    proxies.push({ ...item, name, type: type.toLowerCase(), server, port } as ProxyNode);
+    if (PLACEHOLDER_NODE_PATTERN.test(name)) placeholderCount++;
+    proxies.push({ ...item, name, type: normalizedType, server, port } as ProxyNode);
+  }
+
+  if (droppedTypes.size > 0) {
+    console.warn(`[Prism] 已忽略不支持的节点类型: ${describeDroppedTypes(droppedTypes)}`);
+  }
+  if (placeholderCount > 0) {
+    if (placeholderCount === proxies.length) {
+      console.warn(
+        `[Prism] 订阅中仅包含 ${placeholderCount} 个疑似占位节点，` +
+        '上游可能因客户端 UA 过旧未下发真实节点，可用 ua 参数指定客户端版本'
+      );
+    } else {
+      console.warn(
+        `[Prism] 订阅中包含 ${placeholderCount} 个疑似占位节点，` +
+        '可用 exclude 参数过滤，或用 ua 参数指定客户端版本'
+      );
+    }
   }
 
   return proxies;

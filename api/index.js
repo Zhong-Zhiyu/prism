@@ -2244,6 +2244,181 @@ var init_dist = __esm({
   }
 });
 
+// node_modules/hono/dist/utils/cookie.js
+var validCookieNameRegEx, validCookieValueRegEx, trimCookieWhitespace, parse;
+var init_cookie = __esm({
+  "node_modules/hono/dist/utils/cookie.js"() {
+    init_url();
+    validCookieNameRegEx = /^[\w!#$%&'*.^`|~+-]+$/;
+    validCookieValueRegEx = /^[ !#-:<-[\]-~]*$/;
+    trimCookieWhitespace = (value) => {
+      let start = 0;
+      let end = value.length;
+      while (start < end) {
+        const charCode = value.charCodeAt(start);
+        if (charCode !== 32 && charCode !== 9) {
+          break;
+        }
+        start++;
+      }
+      while (end > start) {
+        const charCode = value.charCodeAt(end - 1);
+        if (charCode !== 32 && charCode !== 9) {
+          break;
+        }
+        end--;
+      }
+      return start === 0 && end === value.length ? value : value.slice(start, end);
+    };
+    parse = (cookie, name) => {
+      if (name && cookie.indexOf(name) === -1) {
+        return {};
+      }
+      const pairs = cookie.split(";");
+      const parsedCookie = /* @__PURE__ */ Object.create(null);
+      for (const pairStr of pairs) {
+        const valueStartPos = pairStr.indexOf("=");
+        if (valueStartPos === -1) {
+          continue;
+        }
+        const cookieName = trimCookieWhitespace(pairStr.substring(0, valueStartPos));
+        if (name && name !== cookieName || !validCookieNameRegEx.test(cookieName) || cookieName in parsedCookie) {
+          continue;
+        }
+        let cookieValue = trimCookieWhitespace(pairStr.substring(valueStartPos + 1));
+        if (cookieValue.startsWith('"') && cookieValue.endsWith('"')) {
+          cookieValue = cookieValue.slice(1, -1);
+        }
+        if (validCookieValueRegEx.test(cookieValue)) {
+          parsedCookie[cookieName] = cookieValue.indexOf("%") !== -1 ? tryDecode(cookieValue, decodeURIComponent_) : cookieValue;
+          if (name) {
+            break;
+          }
+        }
+      }
+      return parsedCookie;
+    };
+  }
+});
+
+// node_modules/hono/dist/helper/cookie/index.js
+var getCookie;
+var init_cookie2 = __esm({
+  "node_modules/hono/dist/helper/cookie/index.js"() {
+    init_cookie();
+    getCookie = (c, key, prefix) => {
+      const cookie = c.req.raw.headers.get("Cookie");
+      if (typeof key === "string") {
+        if (!cookie) {
+          return void 0;
+        }
+        let finalKey = key;
+        if (prefix === "secure") {
+          finalKey = "__Secure-" + key;
+        } else if (prefix === "host") {
+          finalKey = "__Host-" + key;
+        }
+        const obj2 = parse(cookie, finalKey);
+        return obj2[finalKey];
+      }
+      if (!cookie) {
+        return {};
+      }
+      const obj = parse(cookie);
+      return obj;
+    };
+  }
+});
+
+// src/utils/target-support.ts
+function normalizeRulesForClash(rules) {
+  return rules.map(
+    (rule) => /^FINAL\s*,/i.test(rule) ? rule.replace(/^FINAL\s*,/i, "MATCH,") : rule
+  );
+}
+function filterSupportedRules(rules, supported) {
+  const kept = [];
+  const dropped = /* @__PURE__ */ new Map();
+  for (const rule of rules) {
+    if (!rule || rule.startsWith("#")) {
+      kept.push(rule);
+      continue;
+    }
+    const type = rule.split(",")[0].trim().toUpperCase();
+    if (supported.has(type)) {
+      kept.push(rule);
+      continue;
+    }
+    const label = type || "(\u7A7A\u7C7B\u578B)";
+    dropped.set(label, (dropped.get(label) ?? 0) + 1);
+  }
+  return { rules: kept, dropped };
+}
+function totalDroppedRules(dropped) {
+  let total = 0;
+  for (const count of dropped.values()) total += count;
+  return total;
+}
+function describeDroppedTypes(dropped) {
+  return [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([type, count]) => `${type}\xD7${count}`).join("\u3001");
+}
+var MIHOMO_PROXY_TYPES, MIHOMO_RULE_TYPES;
+var init_target_support = __esm({
+  "src/utils/target-support.ts"() {
+    "use strict";
+    MIHOMO_PROXY_TYPES = /* @__PURE__ */ new Set([
+      "ss",
+      "ssr",
+      "vmess",
+      "vless",
+      "trojan",
+      "hysteria",
+      "hysteria2",
+      "tuic",
+      "snell",
+      "http",
+      "socks5",
+      "anytls",
+      "ssh",
+      "wireguard",
+      "mieru"
+    ]);
+    MIHOMO_RULE_TYPES = /* @__PURE__ */ new Set([
+      "DOMAIN",
+      "DOMAIN-SUFFIX",
+      "DOMAIN-KEYWORD",
+      "DOMAIN-REGEX",
+      "GEOSITE",
+      "GEOIP",
+      "SRC-GEOIP",
+      "IP-CIDR",
+      "IP-CIDR6",
+      "IP-SUFFIX",
+      "SRC-IP-CIDR",
+      "SRC-IP-SUFFIX",
+      "IP-ASN",
+      "PROCESS-NAME",
+      "PROCESS-PATH",
+      "PROCESS-NAME-REGEX",
+      "PROCESS-PATH-REGEX",
+      "DST-PORT",
+      "SRC-PORT",
+      "IN-PORT",
+      "IN-TYPE",
+      "IN-USER",
+      "IN-NAME",
+      "NETWORK",
+      "DSCP",
+      "AND",
+      "OR",
+      "NOT",
+      "SUB-RULE",
+      "RULE-SET",
+      "MATCH"
+    ]);
+  }
+});
+
 // src/parsers/yaml-parser.ts
 import yaml from "js-yaml";
 function parseClashYaml(content) {
@@ -2278,16 +2453,37 @@ function parseClashYaml(content) {
 function parseProxies(value) {
   if (!Array.isArray(value)) return [];
   const proxies = [];
+  const droppedTypes = /* @__PURE__ */ new Map();
+  let placeholderCount = 0;
   for (const item of value) {
     if (!isRecord(item)) continue;
     const name = item.name;
     const type = item.type;
     const server = item.server;
     const port = item.port;
-    if (typeof name !== "string" || !name.trim() || typeof type !== "string" || !SUPPORTED_PROXY_TYPES.has(type.toLowerCase()) || typeof server !== "string" || !server.trim() || !Number.isInteger(port) || port < 1 || port > 65535) {
+    const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
+    if (typeof name !== "string" || !name.trim() || !normalizedType || !MIHOMO_PROXY_TYPES.has(normalizedType) || typeof server !== "string" || !server.trim() || !Number.isInteger(port) || port < 1 || port > 65535) {
+      if (normalizedType && !MIHOMO_PROXY_TYPES.has(normalizedType)) {
+        droppedTypes.set(normalizedType, (droppedTypes.get(normalizedType) ?? 0) + 1);
+      }
       continue;
     }
-    proxies.push({ ...item, name, type: type.toLowerCase(), server, port });
+    if (PLACEHOLDER_NODE_PATTERN.test(name)) placeholderCount++;
+    proxies.push({ ...item, name, type: normalizedType, server, port });
+  }
+  if (droppedTypes.size > 0) {
+    console.warn(`[Prism] \u5DF2\u5FFD\u7565\u4E0D\u652F\u6301\u7684\u8282\u70B9\u7C7B\u578B: ${describeDroppedTypes(droppedTypes)}`);
+  }
+  if (placeholderCount > 0) {
+    if (placeholderCount === proxies.length) {
+      console.warn(
+        `[Prism] \u8BA2\u9605\u4E2D\u4EC5\u5305\u542B ${placeholderCount} \u4E2A\u7591\u4F3C\u5360\u4F4D\u8282\u70B9\uFF0C\u4E0A\u6E38\u53EF\u80FD\u56E0\u5BA2\u6237\u7AEF UA \u8FC7\u65E7\u672A\u4E0B\u53D1\u771F\u5B9E\u8282\u70B9\uFF0C\u53EF\u7528 ua \u53C2\u6570\u6307\u5B9A\u5BA2\u6237\u7AEF\u7248\u672C`
+      );
+    } else {
+      console.warn(
+        `[Prism] \u8BA2\u9605\u4E2D\u5305\u542B ${placeholderCount} \u4E2A\u7591\u4F3C\u5360\u4F4D\u8282\u70B9\uFF0C\u53EF\u7528 exclude \u53C2\u6570\u8FC7\u6EE4\uFF0C\u6216\u7528 ua \u53C2\u6570\u6307\u5B9A\u5BA2\u6237\u7AEF\u7248\u672C`
+      );
+    }
   }
   return proxies;
 }
@@ -2302,22 +2498,12 @@ function parseProxyGroups(value) {
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-var SUPPORTED_PROXY_TYPES;
+var PLACEHOLDER_NODE_PATTERN;
 var init_yaml_parser = __esm({
   "src/parsers/yaml-parser.ts"() {
     "use strict";
-    SUPPORTED_PROXY_TYPES = /* @__PURE__ */ new Set([
-      "ss",
-      "ssr",
-      "vmess",
-      "vless",
-      "trojan",
-      "hysteria2",
-      "http",
-      "socks5",
-      "snell",
-      "tuic"
-    ]);
+    init_target_support();
+    PLACEHOLDER_NODE_PATTERN = /只显示|更新客户端|outdated client|update (?:your |the )?client/i;
   }
 });
 
@@ -2931,10 +3117,7 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
             )
           ];
           const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
-          lines.push("rules:");
-          for (const rule of rules) {
-            lines.push(rule.startsWith("#") ? `  ${rule}` : `  - ${formatRule(rule)}`);
-          }
+          writeClashRules(lines, rules);
         } else {
           const deduped = dedupeRulesetEntries(iniConfig.rulesetEntries);
           const entries = params.dedup === false ? deduped : truncateRulesetsAfterFinal(deduped);
@@ -2962,10 +3145,7 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
         }
       } else if (sourceRules.length > 0) {
         const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
-        lines.push("rules:");
-        for (const rule of rules) {
-          lines.push(rule.startsWith("#") ? `  ${rule}` : `  - ${formatRule(rule)}`);
-        }
+        writeClashRules(lines, rules);
       }
       continue;
     }
@@ -3029,9 +3209,11 @@ function formatClashProxy(node, params) {
   if (params.tls13) skip.add("client-fingerprint");
   for (const [k, v] of Object.entries(node)) {
     if (skip.has(k)) continue;
+    if (v === void 0 || v === null) continue;
     if (typeof v === "boolean") kv.push(`${safeKey(k)}: ${v}`);
     else if (typeof v === "number") kv.push(`${safeKey(k)}: ${v}`);
     else if (typeof v === "string") kv.push(`${safeKey(k)}: "${esc(v)}"`);
+    else if (Array.isArray(v) || typeof v === "object") kv.push(`${safeKey(k)}: ${JSON.stringify(v)}`);
   }
   return `  - { ${kv.join(", ")} }`;
 }
@@ -3096,6 +3278,20 @@ function formatRule(rule) {
   }
   return rule;
 }
+function writeClashRules(lines, rules) {
+  const normalized = normalizeRulesForClash(rules);
+  const { rules: supported, dropped } = filterSupportedRules(normalized, MIHOMO_RULE_TYPES);
+  lines.push("rules:");
+  for (const rule of supported) {
+    lines.push(rule.startsWith("#") ? `  ${rule}` : `  - ${formatRule(rule)}`);
+  }
+  const droppedCount = totalDroppedRules(dropped);
+  if (droppedCount > 0) {
+    const detail = describeDroppedTypes(dropped);
+    console.warn(`[Prism] \u5DF2\u8DF3\u8FC7 ${droppedCount} \u6761 Clash/Mihomo \u4E0D\u652F\u6301\u7684\u89C4\u5219: ${detail}`);
+    lines.push(`  # \u5DF2\u8DF3\u8FC7 ${droppedCount} \u6761 Clash/Mihomo \u4E0D\u652F\u6301\u7684\u89C4\u5219\uFF08${detail}\uFF09`);
+  }
+}
 function safeKey(key) {
   if (/^[*&!{}[\]>|%@`"'?#-]/.test(key) || /[:#\s]/.test(key)) {
     return `"${esc(key)}"`;
@@ -3145,6 +3341,7 @@ var init_clash = __esm({
     init_ini_parser();
     init_node_utils();
     init_rule_pruner();
+    init_target_support();
   }
 });
 
@@ -3178,6 +3375,7 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
   }
   config.outbounds = outbounds;
   const rules = [];
+  let skippedRules = 0;
   if (params.config && iniConfig.rulesetEntries.length > 0) {
     const expandedGroups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
     for (const group of expandedGroups) {
@@ -3206,6 +3404,7 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
     for (const rule of finalRules) {
       const singboxRule = convertRuleToSingboxWithTarget(rule);
       if (singboxRule) rules.push(singboxRule);
+      else if (rule && !rule.startsWith("#")) skippedRules++;
     }
   } else {
     const sourceRules = (sourceConfig.rules || []).filter(
@@ -3215,7 +3414,11 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
     for (const rule of finalRules) {
       const singboxRule = convertRuleToSingboxWithTarget(rule, nodeNameMap);
       if (singboxRule) rules.push(singboxRule);
+      else if (rule && !rule.startsWith("#")) skippedRules++;
     }
+  }
+  if (skippedRules > 0) {
+    console.warn(`[sing-box] \u5DF2\u8DF3\u8FC7 ${skippedRules} \u6761\u65E0\u6CD5\u8F6C\u6362\u7684\u89C4\u5219\uFF08\u5982 URL-REGEX\u3001IPSET\uFF09`);
   }
   if (rules.length > 0) {
     config.route = { rules, auto_detect_interface: true };
@@ -3224,7 +3427,10 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
 }
 function convertNodeToSingboxOutbound(node, params) {
   const singboxType = SINGBOX_TYPE_MAP[node.type];
-  if (!singboxType) return null;
+  if (!singboxType) {
+    console.warn(`[sing-box] \u4E0D\u652F\u6301\u7684\u8282\u70B9\u7C7B\u578B: ${node.type} (${node.name})\uFF0C\u5DF2\u8DF3\u8FC7`);
+    return null;
+  }
   const displayName = node.name;
   const outbound = {
     type: singboxType,
@@ -3249,14 +3455,26 @@ function convertNodeToSingboxOutbound(node, params) {
     case "vless":
       outbound.uuid = node.uuid || "";
       break;
+    case "anytls":
+      outbound.password = node.password || "";
+      singboxTls(outbound).enabled = true;
+      break;
   }
   if (params.scv || node["skip-cert-verify"]) {
-    (outbound.tls || (outbound.tls = {}))["insecure"] = true;
+    singboxTls(outbound).insecure = true;
   }
   if (node.sni) {
-    (outbound.tls || (outbound.tls = {}))["server_name"] = node.sni;
+    singboxTls(outbound).server_name = node.sni;
+  }
+  if (node.alpn) {
+    const alpn = Array.isArray(node.alpn) ? node.alpn.map((value) => String(value)).filter(Boolean) : String(node.alpn).split(/[,;]/).map((value) => value.trim()).filter(Boolean);
+    if (alpn.length > 0) singboxTls(outbound).alpn = alpn;
   }
   return outbound;
+}
+function singboxTls(outbound) {
+  if (!outbound.tls || typeof outbound.tls !== "object") outbound.tls = {};
+  return outbound.tls;
 }
 function convertRuleToSingboxWithTarget(rule, nodeNameMap) {
   const parsedRule = parseClashRule(rule);
@@ -3321,7 +3539,8 @@ var init_singbox = __esm({
       http: "http",
       socks5: "socks",
       snell: "snell",
-      tuic: "tuic"
+      tuic: "tuic",
+      anytls: "anytls"
     };
   }
 });
@@ -3345,11 +3564,17 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
   const prepared = prepareNodes(sourceConfig.proxies, params);
   const allNodes = prepared.nodes;
   const nodeNameMap = prepared.displayNames;
+  let skippedNodes = 0;
   for (const node of allNodes) {
     const surgeProxy = convertNodeToSurgeProxy(node, params);
     if (surgeProxy) {
       lines.push(surgeProxy);
+    } else {
+      skippedNodes++;
     }
+  }
+  if (skippedNodes > 0) {
+    lines.push(`# \u5DF2\u8DF3\u8FC7 ${skippedNodes} \u4E2A Surge \u4E0D\u652F\u6301\u7684\u8282\u70B9`);
   }
   lines.push("");
   const allNodeNames = prepared.allNames;
@@ -3499,6 +3724,8 @@ function convertRuleToSurge(rule) {
       return `PROCESS-NAME,${value}`;
     case "USER-AGENT":
       return `USER-AGENT,${value}`;
+    case "URL-REGEX":
+      return `URL-REGEX,${value}`;
     default:
       return null;
   }
@@ -4910,7 +5137,6 @@ __export(worker_exports, {
   default: () => worker_default,
   parseVergeTagFromLocation: () => parseVergeTagFromLocation
 });
-import { getCookie } from "hono/cookie";
 function parseQueryParams(c) {
   const q = c.req.query();
   return {
@@ -5163,6 +5389,7 @@ var init_worker = __esm({
   "src/worker.ts"() {
     "use strict";
     init_dist();
+    init_cookie2();
     init_yaml_parser();
     init_ini_parser();
     init_clash();

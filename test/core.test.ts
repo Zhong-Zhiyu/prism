@@ -29,6 +29,25 @@ proxy-groups:
   assert.deepEqual(config['proxy-groups']?.[0].proxies, ['node-a']);
 });
 
+test('parses mihomo-specific proxy types and drops unknown ones', () => {
+  const config = parseClashYaml(`
+proxies:
+  - { name: traffic-info, type: anytls, server: example.com, port: 50201, password: pw, client-fingerprint: chrome, udp: true, alpn: [h2, http/1.1], sni: tls.example.com, skip-cert-verify: true }
+  - { name: hysteria-node, type: hysteria, server: example.com, port: 8443, password: pw, up: 100, down: 100 }
+  - { name: juicity-node, type: juicity, server: example.com, port: 443 }
+  - { name: outdated-client-node, type: vmess, server: example.com, port: 5002, uuid: 11111111-1111-1111-1111-111111111111, alterId: 0, cipher: auto, udp: true }
+`);
+  assert.deepEqual(config.proxies.map(proxy => proxy.type), ['anytls', 'hysteria', 'vmess']);
+  const anytls = config.proxies[0];
+  assert.equal(anytls.password, 'pw');
+  assert.equal(anytls.sni, 'tls.example.com');
+  assert.deepEqual(anytls.alpn, ['h2', 'http/1.1']);
+  assert.equal(anytls['skip-cert-verify'], true);
+  assert.equal(anytls.udp, true);
+  assert.equal(config.proxies.some(proxy => proxy.name === 'juicity-node'), false);
+  assert.deepEqual(config.proxies.map(proxy => proxy.name), ['traffic-info', 'hysteria-node', 'outdated-client-node']);
+});
+
 test('keeps rule values separate from policy and no-resolve', () => {
   assert.deepEqual(parseClashRule('DOMAIN-SUFFIX,example.com,Proxy'), {
     type: 'DOMAIN-SUFFIX', value: 'example.com', target: 'Proxy', noResolve: false,
@@ -227,15 +246,51 @@ function emptySource(): ClashConfig {
   return { proxies: [], rules: [] };
 }
 
-test('Clash expand output prunes redundant rules and keeps URL-REGEX', () => {
+test('Clash expand output prunes redundant rules and drops mihomo-unsupported rules', () => {
   const output = generateClashConfig(emptySource(), makeIni(), makeParams(), RULE_CONTENTS);
   assert.ok(output.includes('  - DOMAIN-SUFFIX,example.com,🚀 Proxy'));
   assert.ok(!output.includes('sub.example.com'));
   assert.ok(output.includes('  - IP-CIDR,10.0.0.0/8,🚀 Proxy,no-resolve'));
   assert.ok(!output.includes('10.1.0.0/16'));
-  assert.ok(output.includes('  - URL-REGEX,^https?://ads\\.example\\.com/,🚀 Proxy'));
+  assert.equal((output.match(/^ {2}- URL-REGEX/gm) || []).length, 0);
+  assert.ok(output.includes('  # 已跳过 1 条 Clash/Mihomo 不支持的规则（URL-REGEX×1）'));
   assert.ok(output.includes('  - GEOIP,CN,🎯 Direct'));
   assert.ok(output.includes('  - MATCH,🚀 Proxy'));
+});
+
+test('Clash output rewrites FINAL to MATCH and drops unsupported rule types', () => {
+  const source: ClashConfig = {
+    proxies: [{ name: 'n1', type: 'ss', server: 'example.com', port: 443, cipher: 'aes-128-gcm', password: 'pw' }],
+    rules: [
+      'URL-REGEX,(Subject|HELO|SMTP),🎯 Direct',
+      'USER-AGENT,curl,🎯 Direct',
+      'IPSET,test,🎯 Direct',
+      'SCRIPT,test,🎯 Direct',
+      'DOMAIN,a.example.com,🎯 Direct',
+      'FINAL,🚀 Proxy',
+    ],
+  };
+  const output = generateClashConfig(source, parseIniConfig('[custom]'), makeParams({ dedup: false }), {});
+  assert.ok(output.includes('  - DOMAIN,a.example.com,🎯 Direct'));
+  assert.ok(output.includes('  - MATCH,🚀 Proxy'));
+  assert.equal((output.match(/^ {2}- (URL-REGEX|USER-AGENT|IPSET|SCRIPT)/gm) || []).length, 0);
+  assert.ok(output.includes('# 已跳过 4 条 Clash/Mihomo 不支持的规则'));
+});
+
+test('Clash output preserves nested transport options', () => {
+  const source: ClashConfig = {
+    proxies: [{
+      name: 'WS Node', type: 'vmess', server: 'example.com', port: 443,
+      uuid: '11111111-1111-1111-1111-111111111111', network: 'ws',
+      'ws-opts': { path: '/path', headers: { Host: 'example.com' } },
+      alpn: ['h2'],
+    }],
+    rules: [],
+  };
+  const output = generateClashConfig(source, parseIniConfig('[custom]'), makeParams(), {});
+  assert.ok(output.includes('ws-opts: {"path":"/path","headers":{"Host":"example.com"}}'));
+  assert.ok(output.includes('alpn: ["h2"]'));
+  assert.ok(!output.includes('ws-opts: undefined'));
 });
 
 test('Clash expand output keeps every rule when dedup is disabled', () => {
@@ -270,13 +325,14 @@ test('Clash provider mode dedupes providers, infers behavior and truncates after
   assert.ok(output.includes('  - MATCH,🚀 Proxy'));
 });
 
-test('Surge output prunes rules, keeps no-resolve and drops URL-REGEX', () => {
+test('Surge output prunes rules, keeps no-resolve and passes URL-REGEX through', () => {
   const output = generateSurgeConfig(emptySource(), makeIni(), makeParams({ target: 'surge' }), RULE_CONTENTS);
   assert.ok(output.includes('DOMAIN-SUFFIX,example.com,🚀 Proxy'));
   assert.ok(!output.includes('sub.example.com'));
   assert.ok(output.includes('IP-CIDR,10.0.0.0/8,🚀 Proxy,no-resolve'));
   assert.ok(!output.includes('10.1.0.0/16'));
-  assert.ok(!output.includes('URL-REGEX'));
+  // Surge 原生支持 URL-REGEX（mihomo 不支持），因此仅在 Surge 目标保留
+  assert.ok(output.includes('URL-REGEX,^https?://ads\\.example\\.com/,🚀 Proxy'));
   assert.ok(output.includes('GEOIP,CN,🎯 Direct'));
   assert.ok(output.includes('FINAL,🚀 Proxy'));
 });
@@ -290,4 +346,40 @@ test('sing-box output prunes rules and drops URL-REGEX', () => {
   assert.equal(rules.some(rule => JSON.stringify(rule).includes('10.1.0.0/16')), false);
   assert.equal(rules.some(rule => 'domain_regex' in rule), false);
   assert.deepEqual(rules[rules.length - 1], { outbound: '🚀 Proxy' });
+});
+
+test('sing-box output maps anytls nodes with password and tls fields', () => {
+  const source: ClashConfig = {
+    proxies: [{
+      name: 'AnyTLS', type: 'anytls', server: 'example.com', port: 443,
+      password: 'pw', sni: 'x.example.com', alpn: ['h2'], 'skip-cert-verify': true,
+    }],
+    rules: [],
+  };
+  const output = generateSingboxConfig(source, parseIniConfig('[custom]'), makeParams({ target: 'singbox' }), {});
+  const config = JSON.parse(output) as { outbounds: Record<string, unknown>[] };
+  const outbound = config.outbounds.find(item => item.tag === 'AnyTLS') as Record<string, unknown>;
+  assert.ok(outbound);
+  assert.equal(outbound.type, 'anytls');
+  assert.equal(outbound.password, 'pw');
+  assert.deepEqual(outbound.tls, {
+    enabled: true,
+    insecure: true,
+    server_name: 'x.example.com',
+    alpn: ['h2'],
+  });
+});
+
+test('Surge output skips unsupported node types and reports it in a comment', () => {
+  const source: ClashConfig = {
+    proxies: [
+      { name: 'AnyTLS', type: 'anytls', server: 'example.com', port: 443, password: 'pw' },
+      { name: 'SS', type: 'ss', server: 'example.com', port: 443, cipher: 'aes-128-gcm', password: 'pw' },
+    ],
+    rules: [],
+  };
+  const output = generateSurgeConfig(source, parseIniConfig('[custom]'), makeParams({ target: 'surge' }), {});
+  assert.ok(output.includes('# 已跳过 1 个 Surge 不支持的节点'));
+  assert.ok(!output.includes('AnyTLS = '));
+  assert.ok(output.includes('SS = ss, example.com, 443'));
 });

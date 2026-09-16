@@ -41,11 +41,17 @@ export function generateSurgeConfig(
   const allNodes = prepared.nodes;
   const nodeNameMap = prepared.displayNames;
 
+  let skippedNodes = 0;
   for (const node of allNodes) {
     const surgeProxy = convertNodeToSurgeProxy(node, params);
     if (surgeProxy) {
       lines.push(surgeProxy);
+    } else {
+      skippedNodes++;
     }
+  }
+  if (skippedNodes > 0) {
+    lines.push(`# 已跳过 ${skippedNodes} 个 Surge 不支持的节点`);
   }
   lines.push('');
 
@@ -264,6 +270,9 @@ function convertRuleToSurge(rule: string): string | null {
       return `PROCESS-NAME,${value}`;
     case 'USER-AGENT':
       return `USER-AGENT,${value}`;
+    // Surge 原生支持 URL-REGEX，直接透传（mihomo 不支持该类型，故仅 Surge 目标保留）
+    case 'URL-REGEX':
+      return `URL-REGEX,${value}`;
     default:
       return null;
   }
