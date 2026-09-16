@@ -2472,6 +2472,21 @@ function expandPlaceholderProxies(groups, allProxyNames) {
     return { ...group, proxies: expanded };
   });
 }
+function dedupeRulesetEntries(entries) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const entry of entries) {
+    if (entry.isSpecial) {
+      result.push(entry);
+      continue;
+    }
+    const key = `${entry.groupName}\0${entry.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
+  }
+  return result;
+}
 var init_ini_parser = __esm({
   "src/parsers/ini-parser.ts"() {
     "use strict";
@@ -2523,6 +2538,9 @@ function parseClashRule(rule) {
   const type = parts[0].toUpperCase();
   const noResolve = parts[parts.length - 1].toLowerCase() === "no-resolve";
   const body = noResolve ? parts.slice(0, -1) : parts;
+  if (type === "MATCH" || type === "FINAL") {
+    return { type, value: "", target: body[body.length - 1] || "DIRECT", noResolve };
+  }
   const hasTarget = body.length >= 3;
   const target = hasTarget ? body[body.length - 1] : "DIRECT";
   const valueParts = hasTarget ? body.slice(1, -1) : body.slice(1);
@@ -2545,6 +2563,295 @@ function parseRenameRules(value) {
 var init_node_utils = __esm({
   "src/utils/node-utils.ts"() {
     "use strict";
+  }
+});
+
+// src/utils/rule-pruner.ts
+function appendRuleTarget(rule, groupName) {
+  const parts = rule.split(",");
+  const last = parts[parts.length - 1]?.trim();
+  if (last === "no-resolve" && parts.length >= 3) {
+    return `${parts.slice(0, -1).join(",")},${groupName},no-resolve`;
+  }
+  return `${rule},${groupName}`;
+}
+function expandRulesetEntries(iniConfig, ruleContents, finalType, onMissingContent) {
+  const rules = [];
+  for (const entry of iniConfig.rulesetEntries) {
+    if (entry.isSpecial) {
+      if (entry.specialType === "GEOIP" && entry.specialValue) {
+        rules.push(`GEOIP,${entry.specialValue},${entry.groupName}`);
+      } else if (entry.specialType === "FINAL") {
+        rules.push(`${finalType},${entry.groupName}`);
+      }
+      continue;
+    }
+    const content = ruleContents[entry.url];
+    if (!content || content.length === 0) {
+      const note = onMissingContent?.(entry);
+      if (note) rules.push(note);
+      continue;
+    }
+    for (const rule of content) {
+      if (!rule || rule.startsWith("#")) continue;
+      rules.push(appendRuleTarget(rule, entry.groupName));
+    }
+  }
+  return rules;
+}
+function pruneRules(rules) {
+  const stats = {
+    input: rules.length,
+    kept: 0,
+    removed: 0,
+    duplicate: 0,
+    domainCovered: 0,
+    keywordCovered: 0,
+    cidrCovered: 0,
+    afterTerminal: 0
+  };
+  const state = {
+    seen: /* @__PURE__ */ new Set(),
+    suffix: /* @__PURE__ */ new Set(),
+    keywords: [],
+    ipv4Any: /* @__PURE__ */ new Map(),
+    ipv4Resolve: /* @__PURE__ */ new Map(),
+    ipv6Any: /* @__PURE__ */ new Map(),
+    ipv6Resolve: /* @__PURE__ */ new Map()
+  };
+  const kept = [];
+  let terminalReached = false;
+  for (const rule of rules) {
+    if (terminalReached) {
+      stats.afterTerminal++;
+      continue;
+    }
+    if (!rule || rule.startsWith("#")) {
+      kept.push(rule);
+      continue;
+    }
+    const parsed = parseRuleCandidate(rule);
+    if (!parsed) {
+      kept.push(rule);
+      continue;
+    }
+    if (TERMINAL_TYPES.has(parsed.type)) {
+      kept.push(rule);
+      terminalReached = true;
+      continue;
+    }
+    const value = parsed.value.trim();
+    const lower = value.toLowerCase();
+    if (IP_TYPES.has(parsed.type)) {
+      const family = parsed.type === "IP-CIDR" ? 4 : 6;
+      const key2 = `${parsed.type}|${parsed.noResolve ? "nr" : "r"}|${lower}`;
+      if (state.seen.has(key2)) {
+        stats.duplicate++;
+        continue;
+      }
+      const cidr = family === 4 ? parseCidr4(value) : parseCidr6(value);
+      if (cidr) {
+        const index = parsed.noResolve ? family === 4 ? state.ipv4Any : state.ipv6Any : family === 4 ? state.ipv4Resolve : state.ipv6Resolve;
+        if (isCoveredByCidr(index, family, cidr)) {
+          stats.cidrCovered++;
+          continue;
+        }
+      }
+      state.seen.add(key2);
+      if (cidr) {
+        addCidr(family === 4 ? state.ipv4Any : state.ipv6Any, cidr);
+        if (!parsed.noResolve) addCidr(family === 4 ? state.ipv4Resolve : state.ipv6Resolve, cidr);
+      }
+      kept.push(rule);
+      continue;
+    }
+    if (parsed.type === "DOMAIN" || parsed.type === "DOMAIN-SUFFIX") {
+      const key2 = `${parsed.type}|${lower}`;
+      if (state.seen.has(key2)) {
+        stats.duplicate++;
+        continue;
+      }
+      const covered = findDomainCover(state, lower);
+      if (covered === "suffix") {
+        stats.domainCovered++;
+        continue;
+      }
+      if (covered === "keyword") {
+        stats.keywordCovered++;
+        continue;
+      }
+      state.seen.add(key2);
+      if (parsed.type === "DOMAIN-SUFFIX" && lower) state.suffix.add(lower);
+      kept.push(rule);
+      continue;
+    }
+    if (parsed.type === "DOMAIN-KEYWORD") {
+      const key2 = `DOMAIN-KEYWORD|${lower}`;
+      if (state.seen.has(key2)) {
+        stats.duplicate++;
+        continue;
+      }
+      if (lower && state.keywords.some((keyword) => keyword.length <= lower.length && lower.includes(keyword))) {
+        stats.keywordCovered++;
+        continue;
+      }
+      state.seen.add(key2);
+      if (lower) state.keywords.push(lower);
+      kept.push(rule);
+      continue;
+    }
+    const key = `${parsed.type}|${lower}`;
+    if (state.seen.has(key)) {
+      stats.duplicate++;
+      continue;
+    }
+    state.seen.add(key);
+    kept.push(rule);
+  }
+  stats.kept = kept.length;
+  stats.removed = stats.input - stats.kept;
+  return { rules: kept, stats };
+}
+function pruneRulesWithLog(rules) {
+  const { rules: kept, stats } = pruneRules(rules);
+  if (stats.removed > 0) {
+    console.log(
+      `[Prism] \u89C4\u5219\u88C1\u526A: \u8F93\u5165 ${stats.input} \u6761 \u2192 \u4FDD\u7559 ${stats.kept} \u6761\uFF08\u91CD\u590D ${stats.duplicate}\u3001\u57DF\u540D\u8986\u76D6 ${stats.domainCovered}\u3001\u5173\u952E\u5B57\u8986\u76D6 ${stats.keywordCovered}\u3001\u7F51\u6BB5\u5305\u542B ${stats.cidrCovered}\u3001FINAL \u4E4B\u540E ${stats.afterTerminal}\uFF09`
+    );
+  }
+  return kept;
+}
+function parseRuleCandidate(rule) {
+  const parts = rule.split(",");
+  if (parts.length < 2) return null;
+  const type = parts[0].trim().toUpperCase();
+  let end = parts.length;
+  let noResolve = false;
+  if (parts[parts.length - 1].trim().toLowerCase() === "no-resolve") {
+    noResolve = true;
+    end -= 1;
+  }
+  if (end < 2) return null;
+  if (type === "MATCH" || type === "FINAL") return { type, value: "", noResolve };
+  const hasTarget = end >= 3;
+  const valueParts = parts.slice(1, hasTarget ? end - 1 : end);
+  return { type, value: valueParts.map((part) => part.trim()).join(","), noResolve };
+}
+function findDomainCover(state, domain) {
+  let candidate = domain;
+  while (candidate) {
+    if (state.suffix.has(candidate)) return "suffix";
+    const dot = candidate.indexOf(".");
+    if (dot === -1) break;
+    candidate = candidate.slice(dot + 1);
+  }
+  if (domain && state.keywords.some((keyword) => keyword.length <= domain.length && domain.includes(keyword))) {
+    return "keyword";
+  }
+  return null;
+}
+function addCidr(index, cidr) {
+  let set = index.get(cidr.prefix);
+  if (!set) {
+    set = /* @__PURE__ */ new Set();
+    index.set(cidr.prefix, set);
+  }
+  set.add(cidr.net);
+}
+function isCoveredByCidr(index, family, cidr) {
+  for (let prefix = 0; prefix <= cidr.prefix; prefix++) {
+    const set = index.get(prefix);
+    if (!set) continue;
+    const masked = family === 4 ? maskIpv4(cidr.net, prefix) : maskIpv6(cidr.net, prefix);
+    if (set.has(masked)) return true;
+  }
+  return false;
+}
+function isCidrLiteral(value) {
+  const text = value.trim();
+  return parseCidr4(text) !== null || parseCidr6(text) !== null;
+}
+function parseCidr4(value) {
+  const slash = value.lastIndexOf("/");
+  if (slash <= 0) return null;
+  const ipPart = value.slice(0, slash);
+  const prefixPart = value.slice(slash + 1);
+  const prefix = parseDecimal(prefixPart, 3);
+  if (prefix === null) return null;
+  if (prefix > 32 || ipPart.includes(":")) return null;
+  const octets = ipPart.split(".");
+  if (octets.length !== 4) return null;
+  let net = 0;
+  for (const octet of octets) {
+    const part = parseDecimal(octet, 3);
+    if (part === null || part > 255) return null;
+    net = net * 256 + part;
+  }
+  net = net >>> 0;
+  return { net: maskIpv4(net, prefix), prefix };
+}
+function parseCidr6(value) {
+  const slash = value.lastIndexOf("/");
+  if (slash <= 0) return null;
+  const ipPart = value.slice(0, slash);
+  const prefixPart = value.slice(slash + 1);
+  const prefix = parseDecimal(prefixPart, 3);
+  if (prefix === null) return null;
+  if (prefix > 128) return null;
+  const net = parseIpv6(ipPart);
+  if (net === null) return null;
+  return { net: maskIpv6(net, prefix), prefix };
+}
+function parseDecimal(text, maxDigits) {
+  if (text.length === 0 || text.length > maxDigits) return null;
+  let value = 0;
+  for (let i = 0; i < text.length; i++) {
+    const digit = text.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) return null;
+    value = value * 10 + digit;
+  }
+  return value;
+}
+function parseIpv6(text) {
+  if (!text.includes(":") || text.includes("%") || text.includes(".")) return null;
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 ? halves[1] ? halves[1].split(":") : [] : [];
+  let groups;
+  if (halves.length === 2) {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 1) return null;
+    groups = [...head, ...new Array(missing).fill("0"), ...tail];
+  } else {
+    if (head.length !== 8) return null;
+    groups = head;
+  }
+  let net = 0n;
+  for (const group of groups) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(group)) return null;
+    net = net << 16n | BigInt(parseInt(group, 16));
+  }
+  return net;
+}
+function maskIpv4(net, prefix) {
+  if (prefix <= 0) return 0;
+  if (prefix >= 32) return net >>> 0;
+  const shift = 32 - prefix;
+  return net >>> shift << shift >>> 0;
+}
+function maskIpv6(net, prefix) {
+  if (prefix <= 0) return 0n;
+  if (prefix >= 128) return net;
+  const shift = BigInt(128 - prefix);
+  return net >> shift << shift;
+}
+var IP_TYPES, TERMINAL_TYPES;
+var init_rule_pruner = __esm({
+  "src/utils/rule-pruner.ts"() {
+    "use strict";
+    IP_TYPES = /* @__PURE__ */ new Set(["IP-CIDR", "IP-CIDR6"]);
+    TERMINAL_TYPES = /* @__PURE__ */ new Set(["MATCH", "FINAL"]);
   }
 });
 
@@ -2611,69 +2918,53 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
       continue;
     }
     if (key === "rules") {
+      const sourceRules = Array.isArray(value) ? value.filter((rule) => typeof rule === "string") : [];
       if (iniConfig.rulesetEntries.length > 0) {
         if (params.expand !== false) {
+          const rawRules = [
+            ...iniConfig.overwriteOriginalRules ? [] : sourceRules,
+            ...expandRulesetEntries(
+              iniConfig,
+              ruleContents,
+              "MATCH",
+              (entry) => `# \u26A0 \u89C4\u5219\u96C6\u4E0B\u8F7D\u5931\u8D25: ${entry.groupName}`
+            )
+          ];
+          const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
           lines.push("rules:");
-          if (!iniConfig.overwriteOriginalRules && Array.isArray(value)) {
-            for (const rule of value) lines.push(`  - ${formatRule(rule)}`);
-          }
-          for (const entry of iniConfig.rulesetEntries) {
-            if (entry.isSpecial) {
-              if (entry.specialType === "GEOIP") {
-                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
-              } else if (entry.specialType === "FINAL") {
-                lines.push(`  - MATCH,${entry.groupName}`);
-              }
-            } else {
-              const content = ruleContents[entry.url];
-              if (content && content.length > 0) {
-                for (const rule of content) {
-                  if (!rule || rule.startsWith("#")) continue;
-                  if (rule.startsWith("URL-REGEX")) continue;
-                  const parts = rule.split(",");
-                  const last = parts[parts.length - 1]?.trim();
-                  if (last === "no-resolve" && parts.length >= 3) {
-                    const base = parts.slice(0, -1).join(",");
-                    lines.push(`  - ${formatRule(`${base},${entry.groupName},no-resolve`)}`);
-                  } else {
-                    lines.push(`  - ${formatRule(`${rule},${entry.groupName}`)}`);
-                  }
-                }
-              } else {
-                lines.push(`  # \u26A0 \u89C4\u5219\u96C6\u4E0B\u8F7D\u5931\u8D25: ${entry.groupName}`);
-              }
-            }
+          for (const rule of rules) {
+            lines.push(rule.startsWith("#") ? `  ${rule}` : `  - ${formatRule(rule)}`);
           }
         } else {
+          const deduped = dedupeRulesetEntries(iniConfig.rulesetEntries);
+          const entries = params.dedup === false ? deduped : truncateRulesetsAfterFinal(deduped);
+          const { providers, names } = planRuleProviders(entries, ruleContents);
           lines.push("rule-providers:");
-          for (const entry of iniConfig.rulesetEntries) {
-            if (!entry.isSpecial && entry.url) {
-              const pn = sanitizeProviderName(entry.groupName);
-              lines.push(`  ${pn}:`);
-              lines.push(`    type: http`);
-              lines.push(`    behavior: domain`);
-              lines.push(`    url: "${esc(entry.url)}"`);
-              lines.push(`    interval: 86400`);
-            }
+          for (const provider of providers) {
+            lines.push(`  ${provider.name}:`);
+            lines.push(`    type: http`);
+            lines.push(`    behavior: ${provider.behavior}`);
+            lines.push(`    url: "${esc(provider.url)}"`);
+            lines.push(`    interval: 86400`);
           }
           lines.push("rules:");
-          for (const entry of iniConfig.rulesetEntries) {
+          for (const entry of entries) {
             if (entry.isSpecial) {
-              if (entry.specialType === "GEOIP") {
+              if (entry.specialType === "GEOIP" && entry.specialValue) {
                 lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
               } else if (entry.specialType === "FINAL") {
                 lines.push(`  - MATCH,${entry.groupName}`);
               }
-            } else {
-              const pn = sanitizeProviderName(entry.groupName);
-              lines.push(`  - RULE-SET,${pn},${entry.groupName}`);
+            } else if (entry.url) {
+              lines.push(`  - RULE-SET,${names.get(entry.url)},${entry.groupName}`);
             }
           }
         }
-      } else if (Array.isArray(value) && value.length > 0) {
+      } else if (sourceRules.length > 0) {
+        const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
         lines.push("rules:");
-        for (const rule of value) {
-          lines.push(`  - ${formatRule(rule)}`);
+        for (const rule of rules) {
+          lines.push(rule.startsWith("#") ? `  ${rule}` : `  - ${formatRule(rule)}`);
         }
       }
       continue;
@@ -2746,6 +3037,39 @@ function formatClashProxy(node, params) {
 }
 function sanitizeProviderName(name) {
   return name.replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s+/g, "_") || "provider";
+}
+function truncateRulesetsAfterFinal(entries) {
+  const index = entries.findIndex((entry) => entry.isSpecial && entry.specialType === "FINAL");
+  return index === -1 ? entries : entries.slice(0, index + 1);
+}
+function planRuleProviders(entries, ruleContents) {
+  const usedNames = /* @__PURE__ */ new Set();
+  const names = /* @__PURE__ */ new Map();
+  const providers = [];
+  for (const entry of entries) {
+    if (entry.isSpecial || !entry.url || names.has(entry.url)) continue;
+    const base = sanitizeProviderName(entry.groupName);
+    let name = base;
+    let suffix = 2;
+    while (usedNames.has(name)) name = `${base}-${suffix++}`;
+    usedNames.add(name);
+    names.set(entry.url, name);
+    providers.push({ name, url: entry.url, behavior: inferProviderBehavior(ruleContents[entry.url]) });
+  }
+  return { providers, names };
+}
+function inferProviderBehavior(lines) {
+  const content = normalizeRuleSetContent(lines);
+  if (content.length === 0) {
+    console.warn("[Prism] \u89C4\u5219\u96C6\u5185\u5BB9\u4E0D\u53EF\u7528\uFF0Crule-provider behavior \u56DE\u9000\u4E3A classical");
+    return "classical";
+  }
+  if (content.every((line) => !line.includes(",") && isCidrLiteral(line))) return "ipcidr";
+  if (content.every((line) => !line.includes(",") && !/\s/.test(line))) return "domain";
+  return "classical";
+}
+function normalizeRuleSetContent(lines) {
+  return (lines || []).map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith(";") && !line.startsWith("//"));
 }
 function writeProxyGroup(lines, groupType, name, proxies, url, interval, allNodeNames, groupNames, nodeNameMap) {
   let filtered = proxies.filter(
@@ -2820,6 +3144,7 @@ var init_clash = __esm({
     "use strict";
     init_ini_parser();
     init_node_utils();
+    init_rule_pruner();
   }
 });
 
@@ -2876,33 +3201,20 @@ function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
         });
       }
     }
-    for (const entry of iniConfig.rulesetEntries) {
-      if (entry.isSpecial && entry.specialType === "FINAL") {
-        rules.push({ outbound: entry.groupName });
-        continue;
-      }
-      if (entry.isSpecial && entry.specialType === "GEOIP") {
-        rules.push({ geoip: entry.specialValue?.toLowerCase(), outbound: entry.groupName });
-        continue;
-      }
-      const content = ruleContents[entry.url];
-      if (content && content.length > 0) {
-        for (const rule of content) {
-          const singboxRule = convertRuleToSingbox(rule);
-          if (singboxRule) {
-            rules.push({ ...singboxRule, outbound: entry.groupName });
-          }
-        }
-      }
+    const rawRules = expandRulesetEntries(iniConfig, ruleContents, "MATCH");
+    const finalRules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
+    for (const rule of finalRules) {
+      const singboxRule = convertRuleToSingboxWithTarget(rule);
+      if (singboxRule) rules.push(singboxRule);
     }
   } else {
-    for (const rule of sourceConfig.rules || []) {
-      const singboxRule = convertRuleToSingbox(rule);
-      if (singboxRule) {
-        const parsedRule = parseClashRule(rule);
-        const target = parsedRule?.target || "DIRECT";
-        rules.push({ ...singboxRule, outbound: mapNodeReference(target, nodeNameMap) });
-      }
+    const sourceRules = (sourceConfig.rules || []).filter(
+      (rule) => typeof rule === "string" && rule !== "" && !rule.startsWith("#")
+    );
+    const finalRules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
+    for (const rule of finalRules) {
+      const singboxRule = convertRuleToSingboxWithTarget(rule, nodeNameMap);
+      if (singboxRule) rules.push(singboxRule);
     }
   }
   if (rules.length > 0) {
@@ -2945,6 +3257,14 @@ function convertNodeToSingboxOutbound(node, params) {
     (outbound.tls || (outbound.tls = {}))["server_name"] = node.sni;
   }
   return outbound;
+}
+function convertRuleToSingboxWithTarget(rule, nodeNameMap) {
+  const parsedRule = parseClashRule(rule);
+  if (!parsedRule) return null;
+  const outbound = nodeNameMap ? mapNodeReference(parsedRule.target, nodeNameMap) : parsedRule.target;
+  if (parsedRule.type === "MATCH" || parsedRule.type === "FINAL") return { outbound };
+  const converted = convertRuleToSingbox(rule);
+  return converted ? { ...converted, outbound } : null;
 }
 function convertRuleToSingbox(rule) {
   const parsed = parseClashRule(rule);
@@ -2990,6 +3310,7 @@ var init_singbox = __esm({
     "use strict";
     init_ini_parser();
     init_node_utils();
+    init_rule_pruner();
     SINGBOX_TYPE_MAP = {
       ss: "shadowsocks",
       ssr: "shadowsocksr",
@@ -3057,38 +3378,23 @@ function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
     lines.push("");
   }
   if (params.config && iniConfig.rulesetEntries.length > 0) {
+    const rawRules = expandRulesetEntries(iniConfig, ruleContents, "FINAL");
+    const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
     lines.push("[Rule]");
-    for (const entry of iniConfig.rulesetEntries) {
-      if (entry.isSpecial) {
-        if (entry.specialType === "GEOIP" && entry.specialValue) {
-          lines.push(`GEOIP,${entry.specialValue},${entry.groupName}`);
-        } else if (entry.specialType === "FINAL") {
-          lines.push(`FINAL,${entry.groupName}`);
-        }
-      } else {
-        const content = ruleContents[entry.url];
-        if (content) {
-          for (const rule of content) {
-            if (!rule || rule.startsWith("#")) continue;
-            const converted = convertRuleToSurge(rule);
-            if (converted) {
-              lines.push(`${converted},${entry.groupName}`);
-            }
-          }
-        }
-      }
+    for (const rule of rules) {
+      const line = convertRuleToSurgeLine(rule);
+      if (line) lines.push(line);
     }
     lines.push("");
   } else if (sourceConfig.rules && sourceConfig.rules.length > 0) {
+    const sourceRules = sourceConfig.rules.filter(
+      (rule) => typeof rule === "string" && rule !== "" && !rule.startsWith("#")
+    );
+    const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
     lines.push("[Rule]");
-    for (const rule of sourceConfig.rules) {
-      if (!rule || rule.startsWith("#")) continue;
-      const converted = convertRuleToSurge(rule);
-      if (converted) {
-        const parsedRule = parseClashRule(rule);
-        const target = parsedRule?.target || "DIRECT";
-        lines.push(`${converted},${mapNodeReference(target, nodeNameMap)}`);
-      }
+    for (const rule of rules) {
+      const line = convertRuleToSurgeLine(rule, nodeNameMap);
+      if (line) lines.push(line);
     }
     lines.push("");
   }
@@ -3161,6 +3467,16 @@ function mapSurgeGroupType(groupType) {
       return "select";
   }
 }
+function convertRuleToSurgeLine(rule, nodeNameMap) {
+  const parsedRule = parseClashRule(rule);
+  if (!parsedRule) return null;
+  const target = nodeNameMap ? mapNodeReference(parsedRule.target, nodeNameMap) : parsedRule.target;
+  if (parsedRule.type === "MATCH" || parsedRule.type === "FINAL") return `FINAL,${target}`;
+  const converted = convertRuleToSurge(rule);
+  if (!converted) return null;
+  const keepNoResolve = parsedRule.noResolve && (parsedRule.type === "IP-CIDR" || parsedRule.type === "IP-CIDR6");
+  return keepNoResolve ? `${converted},${target},no-resolve` : `${converted},${target}`;
+}
 function convertRuleToSurge(rule) {
   const parsed = parseClashRule(rule);
   if (!parsed) return null;
@@ -3192,6 +3508,7 @@ var init_surge = __esm({
     "use strict";
     init_ini_parser();
     init_node_utils();
+    init_rule_pruner();
   }
 });
 
@@ -3210,7 +3527,8 @@ var init_types = __esm({
       sort: false,
       scv: false,
       expand: true,
-      tls13: false
+      tls13: false,
+      dedup: true
     };
   }
 });
@@ -3701,6 +4019,7 @@ var init_body2 = __esm({
         <label class="toggle-item" data-i18n="toggleSCV"><input type="checkbox" id="scv"> \u8DF3\u8FC7\u8BC1\u4E66\u9A8C\u8BC1</label>
         <label class="toggle-item" data-i18n="toggleSort"><input type="checkbox" id="sort"> \u8282\u70B9\u6392\u5E8F</label>
         <label class="toggle-item" data-i18n="toggleExpand"><input type="checkbox" id="expand" checked> \u5C55\u5F00\u89C4\u5219\u5168\u6587</label>
+        <label class="toggle-item" data-i18n="toggleDedup"><input type="checkbox" id="dedup" checked> \u89C4\u5219\u53BB\u91CD\u4E0E\u88C1\u526A</label>
         <label class="toggle-item" data-i18n="toggleAppendType"><input type="checkbox" id="append_type"> \u8282\u70B9\u540D\u52A0\u7C7B\u578B\u6807\u8BB0</label>
         <label class="toggle-item" data-i18n="toggleTLS13"><input type="checkbox" id="tls13"> TLS 1.3</label>
       </div>
@@ -4016,7 +4335,7 @@ var I18N = {
     advancedParams: '\u8FDB\u9636\u53C2\u6570',
     toggleEmoji: '\u4FDD\u7559 Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP \u5F3A\u5236\u5F00\u542F',
     toggleSCV: '\u8DF3\u8FC7\u8BC1\u4E66\u9A8C\u8BC1', toggleSort: '\u8282\u70B9\u6392\u5E8F', toggleExpand: '\u5C55\u5F00\u89C4\u5219\u5168\u6587',
-    toggleAppendType: '\u8282\u70B9\u540D\u52A0\u7C7B\u578B\u6807\u8BB0', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\u8282\u70B9\u540D\u52A0\u7C7B\u578B\u6807\u8BB0', toggleTLS13: 'TLS 1.3', toggleDedup: '\u89C4\u5219\u53BB\u91CD\u4E0E\u88C1\u526A',
     labelInclude: '\u5305\u542B\u8282\u70B9\uFF08\u6B63\u5219\uFF09', placeholderInclude: '\u5982 HK|JP|TW',
     labelExclude: '\u6392\u9664\u8282\u70B9\uFF08\u6B63\u5219\uFF09', placeholderExclude: '\u5982 \u5269\u4F59|\u5B98\u7F51|\u5230\u671F',
     btnGenerate: '\u751F\u6210\u8BA2\u9605\u94FE\u63A5', labelResult: '\u751F\u6210\u7684\u8BA2\u9605\u94FE\u63A5\uFF1A',
@@ -4035,7 +4354,7 @@ var I18N = {
     advancedParams: 'Advanced Parameters',
     toggleEmoji: 'Keep Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'Force UDP',
     toggleSCV: 'Skip Certificate Verification', toggleSort: 'Sort Nodes', toggleExpand: 'Expand Rules',
-    toggleAppendType: 'Append Type Tag to Node Name', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'Append Type Tag to Node Name', toggleTLS13: 'TLS 1.3', toggleDedup: 'Deduplicate & Prune Rules',
     labelInclude: 'Include Nodes (regex)', placeholderInclude: 'e.g. HK|JP|TW',
     labelExclude: 'Exclude Nodes (regex)', placeholderExclude: 'e.g. remaining|official|expired',
     btnGenerate: 'Generate Subscription', labelResult: 'Subscription URL:',
@@ -4055,7 +4374,7 @@ var I18N = {
     advancedParams: '\u0627\u0644\u0645\u0639\u0644\u0645\u0627\u062A \u0627\u0644\u0645\u062A\u0642\u062F\u0645\u0629',
     toggleEmoji: '\u0627\u0644\u0627\u062D\u062A\u0641\u0627\u0638 \u0628\u0627\u0644\u0631\u0645\u0648\u0632 \u0627\u0644\u062A\u0639\u0628\u064A\u0631\u064A\u0629', toggleTFO: 'TCP Fast Open', toggleUDP: '\u0625\u062C\u0628\u0627\u0631 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 UDP',
     toggleSCV: '\u062A\u062E\u0637\u064A \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0634\u0647\u0627\u062F\u0629', toggleSort: '\u062A\u0631\u062A\u064A\u0628 \u0627\u0644\u062E\u0648\u0627\u062F\u0645', toggleExpand: '\u062A\u0648\u0633\u064A\u0639 \u0645\u062D\u062A\u0648\u0649 \u0627\u0644\u0642\u0648\u0627\u0639\u062F',
-    toggleAppendType: '\u0625\u0636\u0627\u0641\u0629 \u0648\u0633\u0645 \u0627\u0644\u0646\u0648\u0639', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\u0625\u0636\u0627\u0641\u0629 \u0648\u0633\u0645 \u0627\u0644\u0646\u0648\u0639', toggleTLS13: 'TLS 1.3', toggleDedup: '\u0625\u0632\u0627\u0644\u0629 \u062A\u0643\u0631\u0627\u0631 \u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0648\u062A\u0642\u0644\u064A\u0645\u0647\u0627',
     labelInclude: '\u062A\u0636\u0645\u064A\u0646 \u0627\u0644\u062E\u0648\u0627\u062F\u0645 (\u062A\u0639\u0628\u064A\u0631 \u0646\u0645\u0637\u064A)', placeholderInclude: '\u0645\u062B\u0627\u0644 HK|JP|TW',
     labelExclude: '\u0627\u0633\u062A\u0628\u0639\u0627\u062F \u0627\u0644\u062E\u0648\u0627\u062F\u0645 (\u062A\u0639\u0628\u064A\u0631 \u0646\u0645\u0637\u064A)', placeholderExclude: '\u0645\u062B\u0627\u0644 remaining|official|expired',
     btnGenerate: '\u0625\u0646\u0634\u0627\u0621 \u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643', labelResult: '\u0631\u0627\u0628\u0637 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643:',
@@ -4074,7 +4393,7 @@ var I18N = {
     advancedParams: '\u9032\u968E\u53C3\u6578',
     toggleEmoji: '\u4FDD\u7559 Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP \u5F37\u5236\u958B\u555F',
     toggleSCV: '\u8DF3\u904E\u8B49\u66F8\u9A57\u8B49', toggleSort: '\u7BC0\u9EDE\u6392\u5E8F', toggleExpand: '\u5C55\u958B\u898F\u5247\u5168\u6587',
-    toggleAppendType: '\u7BC0\u9EDE\u540D\u7A31\u52A0\u985E\u578B\u6A19\u8A18', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\u7BC0\u9EDE\u540D\u7A31\u52A0\u985E\u578B\u6A19\u8A18', toggleTLS13: 'TLS 1.3', toggleDedup: '\u898F\u5247\u53BB\u91CD\u8207\u88C1\u526A',
     labelInclude: '\u5305\u542B\u7BC0\u9EDE\uFF08\u6B63\u898F\uFF09', placeholderInclude: '\u5982 HK|JP|TW',
     labelExclude: '\u6392\u9664\u7BC0\u9EDE\uFF08\u6B63\u898F\uFF09', placeholderExclude: '\u5982 \u5269\u9918|\u5B98\u7DB2|\u5230\u671F',
     btnGenerate: '\u751F\u6210\u8A02\u95B1\u9023\u7D50', labelResult: '\u751F\u6210\u7684\u8A02\u95B1\u9023\u7D50\uFF1A',
@@ -4093,7 +4412,7 @@ var I18N = {
     advancedParams: '\u8A73\u7D30\u30D1\u30E9\u30E1\u30FC\u30BF',
     toggleEmoji: '\u7D75\u6587\u5B57\u3092\u4FDD\u6301', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP \u3092\u5F37\u5236',
     toggleSCV: '\u8A3C\u660E\u66F8\u691C\u8A3C\u3092\u30B9\u30AD\u30C3\u30D7', toggleSort: '\u30CE\u30FC\u30C9\u3092\u4E26\u3079\u66FF\u3048', toggleExpand: '\u30EB\u30FC\u30EB\u3092\u5C55\u958B',
-    toggleAppendType: '\u30CE\u30FC\u30C9\u540D\u306B\u30BF\u30A4\u30D7\u30BF\u30B0\u3092\u8FFD\u52A0', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\u30CE\u30FC\u30C9\u540D\u306B\u30BF\u30A4\u30D7\u30BF\u30B0\u3092\u8FFD\u52A0', toggleTLS13: 'TLS 1.3', toggleDedup: '\u30EB\u30FC\u30EB\u306E\u91CD\u8907\u6392\u9664\u3068\u6574\u7406',
     labelInclude: '\u542B\u3081\u308B\u30CE\u30FC\u30C9\uFF08\u6B63\u898F\u8868\u73FE\uFF09', placeholderInclude: '\u4F8B: HK|JP|TW',
     labelExclude: '\u9664\u5916\u3059\u308B\u30CE\u30FC\u30C9\uFF08\u6B63\u898F\u8868\u73FE\uFF09', placeholderExclude: '\u4F8B: \u6B8B\u91CF|\u516C\u5F0F\u30B5\u30A4\u30C8|\u671F\u9650\u5207\u308C',
     btnGenerate: '\u30B5\u30D6\u30B9\u30AF\u30EA\u30D7\u30B7\u30E7\u30F3 URL \u3092\u751F\u6210', labelResult: '\u751F\u6210\u3055\u308C\u305F URL:',
@@ -4112,7 +4431,7 @@ var I18N = {
     advancedParams: '\uACE0\uAE09 \uB9E4\uAC1C\uBCC0\uC218',
     toggleEmoji: '\uC774\uBAA8\uC9C0 \uC720\uC9C0', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP \uAC15\uC81C',
     toggleSCV: '\uC778\uC99D\uC11C \uAC80\uC99D \uAC74\uB108\uB6F0\uAE30', toggleSort: '\uB178\uB4DC \uC815\uB82C', toggleExpand: '\uADDC\uCE59 \uD655\uC7A5',
-    toggleAppendType: '\uB178\uB4DC\uBA85\uC5D0 \uC720\uD615 \uD0DC\uADF8 \uCD94\uAC00', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\uB178\uB4DC\uBA85\uC5D0 \uC720\uD615 \uD0DC\uADF8 \uCD94\uAC00', toggleTLS13: 'TLS 1.3', toggleDedup: '\uADDC\uCE59 \uC911\uBCF5 \uC81C\uAC70 \uBC0F \uC815\uB9AC',
     labelInclude: '\uD3EC\uD568\uD560 \uB178\uB4DC (\uC815\uADDC\uC2DD)', placeholderInclude: '\uC608: HK|JP|TW',
     labelExclude: '\uC81C\uC678\uD560 \uB178\uB4DC (\uC815\uADDC\uC2DD)', placeholderExclude: '\uC608: remaining|official|expired',
     btnGenerate: '\uAD6C\uB3C5 \uB9C1\uD06C \uC0DD\uC131', labelResult: '\uC0DD\uC131\uB41C \uAD6C\uB3C5 URL:',
@@ -4131,7 +4450,7 @@ var I18N = {
     advancedParams: '\u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0435 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B',
     toggleEmoji: '\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u044D\u043C\u043E\u0434\u0437\u0438', toggleTFO: 'TCP Fast Open', toggleUDP: '\u041F\u0440\u0438\u043D\u0443\u0434\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0439 UDP',
     toggleSCV: '\u041F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u0430', toggleSort: '\u0421\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0443\u0437\u043B\u044B', toggleExpand: '\u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0443\u0442\u044C \u043F\u0440\u0430\u0432\u0438\u043B\u0430',
-    toggleAppendType: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043C\u0435\u0442\u043A\u0443 \u0442\u0438\u043F\u0430 \u043A \u0438\u043C\u0435\u043D\u0438 \u0443\u0437\u043B\u0430', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043C\u0435\u0442\u043A\u0443 \u0442\u0438\u043F\u0430 \u043A \u0438\u043C\u0435\u043D\u0438 \u0443\u0437\u043B\u0430', toggleTLS13: 'TLS 1.3', toggleDedup: '\u0414\u0435\u0434\u0443\u043F\u043B\u0438\u043A\u0430\u0446\u0438\u044F \u0438 \u043E\u0447\u0438\u0441\u0442\u043A\u0430 \u043F\u0440\u0430\u0432\u0438\u043B',
     labelInclude: '\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0443\u0437\u043B\u044B (\u0440\u0435\u0433\u0443\u043B\u044F\u0440\u043D\u043E\u0435 \u0432\u044B\u0440\u0430\u0436\u0435\u043D\u0438\u0435)', placeholderInclude: '\u043D\u0430\u043F\u0440. HK|JP|TW',
     labelExclude: '\u0418\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0443\u0437\u043B\u044B (\u0440\u0435\u0433\u0443\u043B\u044F\u0440\u043D\u043E\u0435 \u0432\u044B\u0440\u0430\u0436\u0435\u043D\u0438\u0435)', placeholderExclude: '\u043D\u0430\u043F\u0440. remaining|official|expired',
     btnGenerate: '\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443', labelResult: '\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 URL \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438:',
@@ -4150,7 +4469,7 @@ var I18N = {
     advancedParams: 'Tham s\u1ED1 n\xE2ng cao',
     toggleEmoji: 'Gi\u1EEF Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'Bu\u1ED9c UDP',
     toggleSCV: 'B\u1ECF qua x\xE1c minh ch\u1EE9ng ch\u1EC9', toggleSort: 'S\u1EAFp x\u1EBFp n\xFAt', toggleExpand: 'M\u1EDF r\u1ED9ng n\u1ED9i dung quy t\u1EAFc',
-    toggleAppendType: 'Th\xEAm th\u1EBB lo\u1EA1i v\xE0o t\xEAn n\xFAt', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'Th\xEAm th\u1EBB lo\u1EA1i v\xE0o t\xEAn n\xFAt', toggleTLS13: 'TLS 1.3', toggleDedup: 'Lo\u1EA1i b\u1ECF tr\xF9ng l\u1EB7p v\xE0 tinh g\u1ECDn quy t\u1EAFc',
     labelInclude: 'Bao g\u1ED3m n\xFAt (regex)', placeholderInclude: 'vd: HK|JP|TW',
     labelExclude: 'Lo\u1EA1i tr\u1EEB n\xFAt (regex)', placeholderExclude: 'vd: remaining|official|expired',
     btnGenerate: 'T\u1EA1o li\xEAn k\u1EBFt \u0111\u0103ng k\xFD', labelResult: 'URL \u0111\u0103ng k\xFD \u0111\xE3 t\u1EA1o:',
@@ -4169,7 +4488,7 @@ var I18N = {
     advancedParams: '\u067E\u0627\u0631\u0627\u0645\u062A\u0631\u0647\u0627\u06CC \u067E\u06CC\u0634\u0631\u0641\u062A\u0647',
     toggleEmoji: '\u062D\u0641\u0638 \u0627\u06CC\u0645\u0648\u062C\u06CC', toggleTFO: 'TCP Fast Open', toggleUDP: '\u0627\u062C\u0628\u0627\u0631 UDP',
     toggleSCV: '\u0631\u062F \u0634\u062F\u0646 \u0627\u0632 \u062A\u0623\u06CC\u06CC\u062F \u06AF\u0648\u0627\u0647\u06CC', toggleSort: '\u0645\u0631\u062A\u0628\u200C\u0633\u0627\u0632\u06CC \u0633\u0631\u0648\u0631\u0647\u0627', toggleExpand: '\u06AF\u0633\u062A\u0631\u0634 \u0645\u062D\u062A\u0648\u0627\u06CC \u0642\u0648\u0627\u0646\u06CC\u0646',
-    toggleAppendType: '\u0627\u0641\u0632\u0648\u062F\u0646 \u0628\u0631\u0686\u0633\u0628 \u0646\u0648\u0639 \u0628\u0647 \u0646\u0627\u0645 \u0633\u0631\u0648\u0631', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '\u0627\u0641\u0632\u0648\u062F\u0646 \u0628\u0631\u0686\u0633\u0628 \u0646\u0648\u0639 \u0628\u0647 \u0646\u0627\u0645 \u0633\u0631\u0648\u0631', toggleTLS13: 'TLS 1.3', toggleDedup: '\u062D\u0630\u0641 \u062A\u06A9\u0631\u0627\u0631\u06CC \u0648 \u067E\u0627\u0644\u0627\u06CC\u0634 \u0642\u0648\u0627\u0646\u06CC\u0646',
     labelInclude: '\u0634\u0627\u0645\u0644 \u0633\u0631\u0648\u0631\u0647\u0627 (\u0639\u0628\u0627\u0631\u062A \u0645\u0646\u0638\u0645)', placeholderInclude: '\u0645\u062B\u0627\u0644: HK|JP|TW',
     labelExclude: '\u062D\u0630\u0641 \u0633\u0631\u0648\u0631\u0647\u0627 (\u0639\u0628\u0627\u0631\u062A \u0645\u0646\u0638\u0645)', placeholderExclude: '\u0645\u062B\u0627\u0644: remaining|official|expired',
     btnGenerate: '\u0627\u06CC\u062C\u0627\u062F \u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9', labelResult: '\u0644\u06CC\u0646\u06A9 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0627\u06CC\u062C\u0627\u062F \u0634\u062F\u0647:',
@@ -4451,9 +4770,9 @@ function generateSubscription() {
   filename = filename.replace(/\\.(yaml|json|conf)$/i, '');
   params.set('filename', filename);
 
-  var defaults = { emoji: true, tfo: false, udp: false, scv: false, sort: false, expand: true, append_type: false, tls13: false };
+  var defaults = { emoji: true, tfo: false, udp: false, scv: false, sort: false, expand: true, append_type: false, tls13: false, dedup: true };
   var isAdvanced = document.getElementById('advanced').classList.contains('show');
-  ['emoji','tfo','udp','scv','sort','expand','append_type','tls13'].forEach(function(id) {
+  ['emoji','tfo','udp','scv','sort','expand','append_type','tls13','dedup'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) {
       var val = el.checked;
@@ -4610,6 +4929,7 @@ function parseQueryParams(c) {
     scv: parseBool(q.scv) ?? DEFAULT_PARAMS.scv,
     expand: parseBool(q.expand) ?? DEFAULT_PARAMS.expand,
     tls13: parseBool(q.tls13) ?? DEFAULT_PARAMS.tls13,
+    dedup: parseBool(q.dedup) ?? DEFAULT_PARAMS.dedup,
     ua: q.ua || void 0
   };
 }
@@ -4916,18 +5236,28 @@ var init_worker = __esm({
             if (!configResponse.ok) {
               return errorResponse(c, "\u9519\u8BEF\uFF1A\u65E0\u6CD5\u4E0B\u8F7D\u89C4\u5219\u914D\u7F6E", 502);
             }
-            iniConfig = parseIniConfig(configResponse.text);
-            const entries = iniConfig.rulesetEntries.filter((entry) => !entry.isSpecial && entry.url).slice(0, MAX_RULESET_URLS);
-            const results = await mapWithConcurrency(entries, 3, async (entry) => {
+            const parsedConfig = parseIniConfig(configResponse.text);
+            iniConfig = {
+              ...parsedConfig,
+              rulesetEntries: dedupeRulesetEntries(parsedConfig.rulesetEntries)
+            };
+            const ruleSetUrls = [];
+            const seenUrls = /* @__PURE__ */ new Set();
+            for (const entry of iniConfig.rulesetEntries) {
+              if (entry.isSpecial || !entry.url || seenUrls.has(entry.url)) continue;
+              seenUrls.add(entry.url);
+              ruleSetUrls.push(entry.url);
+            }
+            const results = await mapWithConcurrency(ruleSetUrls.slice(0, MAX_RULESET_URLS), 3, async (url) => {
               try {
-                const ruleResponse = await fetchTextSafe(entry.url, await buildUpstreamHeaders(c), MAX_RULESET_BYTES);
-                if (!ruleResponse.ok) return { url: entry.url, lines: [] };
+                const ruleResponse = await fetchTextSafe(url, await buildUpstreamHeaders(c), MAX_RULESET_BYTES);
+                if (!ruleResponse.ok) return { url, lines: [] };
                 return {
-                  url: entry.url,
+                  url,
                   lines: ruleResponse.text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith(";"))
                 };
               } catch {
-                return { url: entry.url, lines: [] };
+                return { url, lines: [] };
               }
             });
             for (const { url, lines } of results) ruleContents[url] = lines;

@@ -6,6 +6,7 @@
 import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams } from '../utils/types';
 import { expandPlaceholderProxies } from '../parsers/ini-parser';
 import { mapNodeReference, parseClashRule, prepareNodes } from '../utils/node-utils';
+import { expandRulesetEntries, pruneRulesWithLog } from '../utils/rule-pruner';
 
 /**
  * 生成 Surge INI 格式的配置
@@ -82,39 +83,24 @@ export function generateSurgeConfig(
 
   // ---- Rule 规则 ----
   if (params.config && iniConfig.rulesetEntries.length > 0) {
+    const rawRules = expandRulesetEntries(iniConfig, ruleContents, 'FINAL');
+    const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
     lines.push('[Rule]');
-    for (const entry of iniConfig.rulesetEntries) {
-      if (entry.isSpecial) {
-        if (entry.specialType === 'GEOIP' && entry.specialValue) {
-          lines.push(`GEOIP,${entry.specialValue},${entry.groupName}`);
-        } else if (entry.specialType === 'FINAL') {
-          lines.push(`FINAL,${entry.groupName}`);
-        }
-      } else {
-        const content = ruleContents[entry.url];
-        if (content) {
-          for (const rule of content) {
-            if (!rule || rule.startsWith('#')) continue;
-            const converted = convertRuleToSurge(rule);
-            if (converted) {
-              lines.push(`${converted},${entry.groupName}`);
-            }
-          }
-        }
-      }
+    for (const rule of rules) {
+      const line = convertRuleToSurgeLine(rule);
+      if (line) lines.push(line);
     }
     lines.push('');
   } else if (sourceConfig.rules && sourceConfig.rules.length > 0) {
     // 无外部 config 时，从原始订阅生成规则
+    const sourceRules = sourceConfig.rules.filter(
+      (rule): rule is string => typeof rule === 'string' && rule !== '' && !rule.startsWith('#')
+    );
+    const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
     lines.push('[Rule]');
-    for (const rule of sourceConfig.rules) {
-      if (!rule || rule.startsWith('#')) continue;
-      const converted = convertRuleToSurge(rule);
-      if (converted) {
-        const parsedRule = parseClashRule(rule);
-        const target = parsedRule?.target || 'DIRECT';
-        lines.push(`${converted},${mapNodeReference(target, nodeNameMap)}`);
-      }
+    for (const rule of rules) {
+      const line = convertRuleToSurgeLine(rule, nodeNameMap);
+      if (line) lines.push(line);
     }
     lines.push('');
   }
@@ -238,6 +224,22 @@ function mapSurgeGroupType(groupType: string): string {
 /**
  * 转换 Clash 规则为 Surge 规则
  */
+function convertRuleToSurgeLine(rule: string, nodeNameMap?: Map<string, string>): string | null {
+  const parsedRule = parseClashRule(rule);
+  if (!parsedRule) return null;
+
+  const target = nodeNameMap ? mapNodeReference(parsedRule.target, nodeNameMap) : parsedRule.target;
+  if (parsedRule.type === 'MATCH' || parsedRule.type === 'FINAL') return `FINAL,${target}`;
+
+  const converted = convertRuleToSurge(rule);
+  if (!converted) return null;
+
+  // Surge 的 IP 类规则同样支持 no-resolve，保留原始语义
+  const keepNoResolve = parsedRule.noResolve
+    && (parsedRule.type === 'IP-CIDR' || parsedRule.type === 'IP-CIDR6');
+  return keepNoResolve ? `${converted},${target},no-resolve` : `${converted},${target}`;
+}
+
 function convertRuleToSurge(rule: string): string | null {
   const parsed = parseClashRule(rule);
   if (!parsed) return null;

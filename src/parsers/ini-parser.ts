@@ -219,3 +219,25 @@ export function expandPlaceholderProxies(
     return { ...group, proxies: expanded };
   });
 }
+
+/**
+ * 去除重复的 ruleset 条目：相同「策略组 + 规则集 URL」只保留第一条。
+ * 特殊条目（[]GEOIP / []FINAL）不参与去重，保持原顺序。
+ */
+export function dedupeRulesetEntries(entries: RulesetEntry[]): RulesetEntry[] {
+  const seen = new Set<string>();
+  const result: RulesetEntry[] = [];
+
+  for (const entry of entries) {
+    if (entry.isSpecial) {
+      result.push(entry);
+      continue;
+    }
+    const key = `${entry.groupName}\u0000${entry.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
+  }
+
+  return result;
+}

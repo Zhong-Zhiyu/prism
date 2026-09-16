@@ -109,6 +109,7 @@ export interface ConversionParams {
   scv?: boolean;
   expand?: boolean;
   tls13?: boolean;
+  dedup?: boolean;
   ua?: string;
 }
 
@@ -133,4 +134,5 @@ export const DEFAULT_PARAMS: ConversionParams = {
   scv: false,
   expand: true,
   tls13: false,
+  dedup: true,
 };

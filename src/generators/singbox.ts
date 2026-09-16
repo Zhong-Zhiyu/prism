@@ -6,6 +6,7 @@
 import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams } from '../utils/types';
 import { expandPlaceholderProxies } from '../parsers/ini-parser';
 import { mapNodeReference, parseClashRule, prepareNodes } from '../utils/node-utils';
+import { expandRulesetEntries, pruneRulesWithLog } from '../utils/rule-pruner';
 
 /**
  * sing-box outbound 类型映射
@@ -103,34 +104,21 @@ export function generateSingboxConfig(
       }
     }
 
-    for (const entry of iniConfig.rulesetEntries) {
-      if (entry.isSpecial && entry.specialType === 'FINAL') {
-        rules.push({ outbound: entry.groupName });
-        continue;
-      }
-      if (entry.isSpecial && entry.specialType === 'GEOIP') {
-        rules.push({ geoip: entry.specialValue?.toLowerCase(), outbound: entry.groupName });
-        continue;
-      }
-      const content = ruleContents[entry.url];
-      if (content && content.length > 0) {
-        for (const rule of content) {
-          const singboxRule = convertRuleToSingbox(rule);
-          if (singboxRule) {
-            rules.push({ ...singboxRule, outbound: entry.groupName });
-          }
-        }
-      }
+    const rawRules = expandRulesetEntries(iniConfig, ruleContents, 'MATCH');
+    const finalRules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
+    for (const rule of finalRules) {
+      const singboxRule = convertRuleToSingboxWithTarget(rule);
+      if (singboxRule) rules.push(singboxRule);
     }
   } else {
     // 无外部 config 时，从原始订阅生成默认路由
-    for (const rule of sourceConfig.rules || []) {
-      const singboxRule = convertRuleToSingbox(rule);
-      if (singboxRule) {
-        const parsedRule = parseClashRule(rule);
-        const target = parsedRule?.target || 'DIRECT';
-        rules.push({ ...singboxRule, outbound: mapNodeReference(target, nodeNameMap) });
-      }
+    const sourceRules = (sourceConfig.rules || []).filter(
+      (rule): rule is string => typeof rule === 'string' && rule !== '' && !rule.startsWith('#')
+    );
+    const finalRules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
+    for (const rule of finalRules) {
+      const singboxRule = convertRuleToSingboxWithTarget(rule, nodeNameMap);
+      if (singboxRule) rules.push(singboxRule);
     }
   }
 
@@ -216,6 +204,20 @@ function applySingboxNodeFilters(nodes: ProxyNode[], params: ConversionParams): 
 /**
  * 转换 Clash 规则为 sing-box 规则
  */
+function convertRuleToSingboxWithTarget(
+  rule: string,
+  nodeNameMap?: Map<string, string>
+): Record<string, unknown> | null {
+  const parsedRule = parseClashRule(rule);
+  if (!parsedRule) return null;
+
+  const outbound = nodeNameMap ? mapNodeReference(parsedRule.target, nodeNameMap) : parsedRule.target;
+  if (parsedRule.type === 'MATCH' || parsedRule.type === 'FINAL') return { outbound };
+
+  const converted = convertRuleToSingbox(rule);
+  return converted ? { ...converted, outbound } : null;
+}
+
 function convertRuleToSingbox(rule: string): Record<string, unknown> | null {
   const parsed = parseClashRule(rule);
   if (!parsed) return null;

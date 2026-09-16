@@ -120,6 +120,7 @@ export const BODY = `<body>
         <label class="toggle-item" data-i18n="toggleSCV"><input type="checkbox" id="scv"> 跳过证书验证</label>
         <label class="toggle-item" data-i18n="toggleSort"><input type="checkbox" id="sort"> 节点排序</label>
         <label class="toggle-item" data-i18n="toggleExpand"><input type="checkbox" id="expand" checked> 展开规则全文</label>
+        <label class="toggle-item" data-i18n="toggleDedup"><input type="checkbox" id="dedup" checked> 规则去重与裁剪</label>
         <label class="toggle-item" data-i18n="toggleAppendType"><input type="checkbox" id="append_type"> 节点名加类型标记</label>
         <label class="toggle-item" data-i18n="toggleTLS13"><input type="checkbox" id="tls13"> TLS 1.3</label>
       </div>

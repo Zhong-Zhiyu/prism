@@ -264,7 +264,7 @@ var I18N = {
     advancedParams: '进阶参数',
     toggleEmoji: '保留 Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP 强制开启',
     toggleSCV: '跳过证书验证', toggleSort: '节点排序', toggleExpand: '展开规则全文',
-    toggleAppendType: '节点名加类型标记', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '节点名加类型标记', toggleTLS13: 'TLS 1.3', toggleDedup: '规则去重与裁剪',
     labelInclude: '包含节点（正则）', placeholderInclude: '如 HK|JP|TW',
     labelExclude: '排除节点（正则）', placeholderExclude: '如 剩余|官网|到期',
     btnGenerate: '生成订阅链接', labelResult: '生成的订阅链接：',
@@ -283,7 +283,7 @@ var I18N = {
     advancedParams: 'Advanced Parameters',
     toggleEmoji: 'Keep Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'Force UDP',
     toggleSCV: 'Skip Certificate Verification', toggleSort: 'Sort Nodes', toggleExpand: 'Expand Rules',
-    toggleAppendType: 'Append Type Tag to Node Name', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'Append Type Tag to Node Name', toggleTLS13: 'TLS 1.3', toggleDedup: 'Deduplicate & Prune Rules',
     labelInclude: 'Include Nodes (regex)', placeholderInclude: 'e.g. HK|JP|TW',
     labelExclude: 'Exclude Nodes (regex)', placeholderExclude: 'e.g. remaining|official|expired',
     btnGenerate: 'Generate Subscription', labelResult: 'Subscription URL:',
@@ -303,7 +303,7 @@ var I18N = {
     advancedParams: 'المعلمات المتقدمة',
     toggleEmoji: 'الاحتفاظ بالرموز التعبيرية', toggleTFO: 'TCP Fast Open', toggleUDP: 'إجبار استخدام UDP',
     toggleSCV: 'تخطي التحقق من الشهادة', toggleSort: 'ترتيب الخوادم', toggleExpand: 'توسيع محتوى القواعد',
-    toggleAppendType: 'إضافة وسم النوع', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'إضافة وسم النوع', toggleTLS13: 'TLS 1.3', toggleDedup: 'إزالة تكرار القواعد وتقليمها',
     labelInclude: 'تضمين الخوادم (تعبير نمطي)', placeholderInclude: 'مثال HK|JP|TW',
     labelExclude: 'استبعاد الخوادم (تعبير نمطي)', placeholderExclude: 'مثال remaining|official|expired',
     btnGenerate: 'إنشاء رابط الاشتراك', labelResult: 'رابط الاشتراك:',
@@ -322,7 +322,7 @@ var I18N = {
     advancedParams: '進階參數',
     toggleEmoji: '保留 Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP 強制開啟',
     toggleSCV: '跳過證書驗證', toggleSort: '節點排序', toggleExpand: '展開規則全文',
-    toggleAppendType: '節點名稱加類型標記', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '節點名稱加類型標記', toggleTLS13: 'TLS 1.3', toggleDedup: '規則去重與裁剪',
     labelInclude: '包含節點（正規）', placeholderInclude: '如 HK|JP|TW',
     labelExclude: '排除節點（正規）', placeholderExclude: '如 剩餘|官網|到期',
     btnGenerate: '生成訂閱連結', labelResult: '生成的訂閱連結：',
@@ -341,7 +341,7 @@ var I18N = {
     advancedParams: '詳細パラメータ',
     toggleEmoji: '絵文字を保持', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP を強制',
     toggleSCV: '証明書検証をスキップ', toggleSort: 'ノードを並べ替え', toggleExpand: 'ルールを展開',
-    toggleAppendType: 'ノード名にタイプタグを追加', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'ノード名にタイプタグを追加', toggleTLS13: 'TLS 1.3', toggleDedup: 'ルールの重複排除と整理',
     labelInclude: '含めるノード（正規表現）', placeholderInclude: '例: HK|JP|TW',
     labelExclude: '除外するノード（正規表現）', placeholderExclude: '例: 残量|公式サイト|期限切れ',
     btnGenerate: 'サブスクリプション URL を生成', labelResult: '生成された URL:',
@@ -360,7 +360,7 @@ var I18N = {
     advancedParams: '고급 매개변수',
     toggleEmoji: '이모지 유지', toggleTFO: 'TCP Fast Open', toggleUDP: 'UDP 강제',
     toggleSCV: '인증서 검증 건너뛰기', toggleSort: '노드 정렬', toggleExpand: '규칙 확장',
-    toggleAppendType: '노드명에 유형 태그 추가', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: '노드명에 유형 태그 추가', toggleTLS13: 'TLS 1.3', toggleDedup: '규칙 중복 제거 및 정리',
     labelInclude: '포함할 노드 (정규식)', placeholderInclude: '예: HK|JP|TW',
     labelExclude: '제외할 노드 (정규식)', placeholderExclude: '예: remaining|official|expired',
     btnGenerate: '구독 링크 생성', labelResult: '생성된 구독 URL:',
@@ -379,7 +379,7 @@ var I18N = {
     advancedParams: 'Дополнительные параметры',
     toggleEmoji: 'Сохранить эмодзи', toggleTFO: 'TCP Fast Open', toggleUDP: 'Принудительный UDP',
     toggleSCV: 'Пропустить проверку сертификата', toggleSort: 'Сортировать узлы', toggleExpand: 'Развернуть правила',
-    toggleAppendType: 'Добавить метку типа к имени узла', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'Добавить метку типа к имени узла', toggleTLS13: 'TLS 1.3', toggleDedup: 'Дедупликация и очистка правил',
     labelInclude: 'Включить узлы (регулярное выражение)', placeholderInclude: 'напр. HK|JP|TW',
     labelExclude: 'Исключить узлы (регулярное выражение)', placeholderExclude: 'напр. remaining|official|expired',
     btnGenerate: 'Сгенерировать ссылку', labelResult: 'Сгенерированный URL подписки:',
@@ -398,7 +398,7 @@ var I18N = {
     advancedParams: 'Tham số nâng cao',
     toggleEmoji: 'Giữ Emoji', toggleTFO: 'TCP Fast Open', toggleUDP: 'Buộc UDP',
     toggleSCV: 'Bỏ qua xác minh chứng chỉ', toggleSort: 'Sắp xếp nút', toggleExpand: 'Mở rộng nội dung quy tắc',
-    toggleAppendType: 'Thêm thẻ loại vào tên nút', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'Thêm thẻ loại vào tên nút', toggleTLS13: 'TLS 1.3', toggleDedup: 'Loại bỏ trùng lặp và tinh gọn quy tắc',
     labelInclude: 'Bao gồm nút (regex)', placeholderInclude: 'vd: HK|JP|TW',
     labelExclude: 'Loại trừ nút (regex)', placeholderExclude: 'vd: remaining|official|expired',
     btnGenerate: 'Tạo liên kết đăng ký', labelResult: 'URL đăng ký đã tạo:',
@@ -417,7 +417,7 @@ var I18N = {
     advancedParams: 'پارامترهای پیشرفته',
     toggleEmoji: 'حفظ ایموجی', toggleTFO: 'TCP Fast Open', toggleUDP: 'اجبار UDP',
     toggleSCV: 'رد شدن از تأیید گواهی', toggleSort: 'مرتب‌سازی سرورها', toggleExpand: 'گسترش محتوای قوانین',
-    toggleAppendType: 'افزودن برچسب نوع به نام سرور', toggleTLS13: 'TLS 1.3',
+    toggleAppendType: 'افزودن برچسب نوع به نام سرور', toggleTLS13: 'TLS 1.3', toggleDedup: 'حذف تکراری و پالایش قوانین',
     labelInclude: 'شامل سرورها (عبارت منظم)', placeholderInclude: 'مثال: HK|JP|TW',
     labelExclude: 'حذف سرورها (عبارت منظم)', placeholderExclude: 'مثال: remaining|official|expired',
     btnGenerate: 'ایجاد لینک اشتراک', labelResult: 'لینک اشتراک ایجاد شده:',
@@ -699,9 +699,9 @@ function generateSubscription() {
   filename = filename.replace(/\\.(yaml|json|conf)$/i, '');
   params.set('filename', filename);
 
-  var defaults = { emoji: true, tfo: false, udp: false, scv: false, sort: false, expand: true, append_type: false, tls13: false };
+  var defaults = { emoji: true, tfo: false, udp: false, scv: false, sort: false, expand: true, append_type: false, tls13: false, dedup: true };
   var isAdvanced = document.getElementById('advanced').classList.contains('show');
-  ['emoji','tfo','udp','scv','sort','expand','append_type','tls13'].forEach(function(id) {
+  ['emoji','tfo','udp','scv','sort','expand','append_type','tls13','dedup'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) {
       var val = el.checked;

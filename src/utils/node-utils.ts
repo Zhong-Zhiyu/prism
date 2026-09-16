@@ -63,6 +63,10 @@ export function parseClashRule(rule: string): ParsedRule | null {
   const type = parts[0].toUpperCase();
   const noResolve = parts[parts.length - 1].toLowerCase() === 'no-resolve';
   const body = noResolve ? parts.slice(0, -1) : parts;
+  // MATCH / FINAL 没有匹配值，第二个字段即策略组
+  if (type === 'MATCH' || type === 'FINAL') {
+    return { type, value: '', target: body[body.length - 1] || 'DIRECT', noResolve };
+  }
   const hasTarget = body.length >= 3;
   const target = hasTarget ? body[body.length - 1] : 'DIRECT';
   const valueParts = hasTarget ? body.slice(1, -1) : body.slice(1);

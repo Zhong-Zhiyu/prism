@@ -2,9 +2,10 @@
 // Clash (Mihomo) 配置生成器
 // ============================================================
 
-import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams } from '../utils/types';
-import { expandPlaceholderProxies } from '../parsers/ini-parser';
+import type { ClashConfig, ProxyNode, ParsedIniConfig, ConversionParams, RulesetEntry } from '../utils/types';
+import { dedupeRulesetEntries, expandPlaceholderProxies } from '../parsers/ini-parser';
 import { mapNodeReference, prepareNodes } from '../utils/node-utils';
+import { expandRulesetEntries, isCidrLiteral, pruneRulesWithLog } from '../utils/rule-pruner';
 
 /**
  * 生成 Clash 格式的 YAML 配置
@@ -69,70 +70,55 @@ export function generateClashConfig(
 
     // --- rules ---
     if (key === 'rules') {
+      const sourceRules = Array.isArray(value)
+        ? (value as unknown[]).filter((rule): rule is string => typeof rule === 'string')
+        : [];
+
       if (iniConfig.rulesetEntries.length > 0) {
         if (params.expand !== false) {
+          // 展开模式：源订阅规则在前，规则集条目按序在后，裁剪后逐条输出
+          const rawRules = [
+            ...(iniConfig.overwriteOriginalRules ? [] : sourceRules),
+            ...expandRulesetEntries(iniConfig, ruleContents, 'MATCH',
+              entry => `# ⚠ 规则集下载失败: ${entry.groupName}`),
+          ];
+          const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
           lines.push('rules:');
-          if (!iniConfig.overwriteOriginalRules && Array.isArray(value)) {
-            for (const rule of value as string[]) lines.push(`  - ${formatRule(rule)}`);
-          }
-          for (const entry of iniConfig.rulesetEntries) {
-            if (entry.isSpecial) {
-              if (entry.specialType === 'GEOIP') {
-                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
-              } else if (entry.specialType === 'FINAL') {
-                lines.push(`  - MATCH,${entry.groupName}`);
-              }
-            } else {
-              const content = ruleContents[entry.url];
-              if (content && content.length > 0) {
-                for (const rule of content) {
-                  if (!rule || rule.startsWith('#')) continue;
-                  if (rule.startsWith('URL-REGEX')) continue;
-                  const parts = rule.split(',');
-                  const last = parts[parts.length - 1]?.trim();
-                  if (last === 'no-resolve' && parts.length >= 3) {
-                    const base = parts.slice(0, -1).join(',');
-                    lines.push(`  - ${formatRule(`${base},${entry.groupName},no-resolve`)}`);
-                  } else {
-                    lines.push(`  - ${formatRule(`${rule},${entry.groupName}`)}`);
-                  }
-                }
-              } else {
-                // 规则集下载失败，展开模式下跳过以避免引用不存在的 provider
-                lines.push(`  # ⚠ 规则集下载失败: ${entry.groupName}`);
-              }
-            }
+          for (const rule of rules) {
+            lines.push(rule.startsWith('#') ? `  ${rule}` : `  - ${formatRule(rule)}`);
           }
         } else {
+          // 非展开模式：条目去重 + 首个 FINAL 之后截断，provider 名按 URL 唯一化
+          const deduped = dedupeRulesetEntries(iniConfig.rulesetEntries);
+          const entries = params.dedup === false ? deduped : truncateRulesetsAfterFinal(deduped);
+          const { providers, names } = planRuleProviders(entries, ruleContents);
+
           lines.push('rule-providers:');
-          for (const entry of iniConfig.rulesetEntries) {
-            if (!entry.isSpecial && entry.url) {
-              const pn = sanitizeProviderName(entry.groupName);
-              lines.push(`  ${pn}:`);
-              lines.push(`    type: http`);
-              lines.push(`    behavior: domain`);
-              lines.push(`    url: "${esc(entry.url)}"`);
-              lines.push(`    interval: 86400`);
-            }
+          for (const provider of providers) {
+            lines.push(`  ${provider.name}:`);
+            lines.push(`    type: http`);
+            lines.push(`    behavior: ${provider.behavior}`);
+            lines.push(`    url: "${esc(provider.url)}"`);
+            lines.push(`    interval: 86400`);
           }
           lines.push('rules:');
-          for (const entry of iniConfig.rulesetEntries) {
+          for (const entry of entries) {
             if (entry.isSpecial) {
-              if (entry.specialType === 'GEOIP') {
+              if (entry.specialType === 'GEOIP' && entry.specialValue) {
                 lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
               } else if (entry.specialType === 'FINAL') {
                 lines.push(`  - MATCH,${entry.groupName}`);
               }
-            } else {
-              const pn = sanitizeProviderName(entry.groupName);
-              lines.push(`  - RULE-SET,${pn},${entry.groupName}`);
+            } else if (entry.url) {
+              lines.push(`  - RULE-SET,${names.get(entry.url)},${entry.groupName}`);
             }
           }
         }
-      } else if (Array.isArray(value) && value.length > 0) {
+      } else if (sourceRules.length > 0) {
+        const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
         lines.push('rules:');
-        for (const rule of value as string[]) {
-          lines.push(`  - ${formatRule(rule)}`);
+        for (const rule of rules) {
+          lines.push(rule.startsWith('#') ? `  ${rule}` : `  - ${formatRule(rule)}`);
         }
       }
       continue;
@@ -249,6 +235,69 @@ function applyRenames(nodes: ProxyNode[], renameStr: string): ProxyNode[] {
 function sanitizeProviderName(name: string): string {
   // 仅移除 YAML 有问题的字符，保留中文等 Unicode 字母
   return name.replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s+/g, '_') || 'provider';
+}
+
+interface ProviderPlan {
+  name: string;
+  url: string;
+  behavior: string;
+}
+
+/**
+ * 截断第一个 FINAL 特殊条目之后的所有 ruleset 条目（其规则永远不会被求值）
+ */
+function truncateRulesetsAfterFinal(entries: RulesetEntry[]): RulesetEntry[] {
+  const index = entries.findIndex(entry => entry.isSpecial && entry.specialType === 'FINAL');
+  return index === -1 ? entries : entries.slice(0, index + 1);
+}
+
+/**
+ * 生成 rule-providers 定义：provider 名按 URL 唯一化（同名策略组的不同规则集追加 -2/-3），
+ * 同一 URL 被多个策略组引用时只定义一次，behavior 按抓取到的内容推断。
+ */
+function planRuleProviders(
+  entries: RulesetEntry[],
+  ruleContents: Record<string, string[]>
+): { providers: ProviderPlan[]; names: Map<string, string> } {
+  const usedNames = new Set<string>();
+  const names = new Map<string, string>();
+  const providers: ProviderPlan[] = [];
+
+  for (const entry of entries) {
+    if (entry.isSpecial || !entry.url || names.has(entry.url)) continue;
+
+    const base = sanitizeProviderName(entry.groupName);
+    let name = base;
+    let suffix = 2;
+    while (usedNames.has(name)) name = `${base}-${suffix++}`;
+
+    usedNames.add(name);
+    names.set(entry.url, name);
+    providers.push({ name, url: entry.url, behavior: inferProviderBehavior(ruleContents[entry.url]) });
+  }
+
+  return { providers, names };
+}
+
+/**
+ * 按规则集内容推断 rule-provider 的 behavior：
+ * 全部为裸网段 → ipcidr；全部为无逗号裸域名 → domain；其余（classical 规则或混合内容）→ classical
+ */
+export function inferProviderBehavior(lines: string[] | undefined): string {
+  const content = normalizeRuleSetContent(lines);
+  if (content.length === 0) {
+    console.warn('[Prism] 规则集内容不可用，rule-provider behavior 回退为 classical');
+    return 'classical';
+  }
+  if (content.every(line => !line.includes(',') && isCidrLiteral(line))) return 'ipcidr';
+  if (content.every(line => !line.includes(',') && !/\s/.test(line))) return 'domain';
+  return 'classical';
+}
+
+function normalizeRuleSetContent(lines: string[] | undefined): string[] {
+  return (lines || [])
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#') && !line.startsWith(';') && !line.startsWith('//'));
 }
 
 function writeProxyGroup(

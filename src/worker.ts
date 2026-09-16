@@ -7,11 +7,11 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { parseClashYaml } from './parsers/yaml-parser';
-import { parseIniConfig } from './parsers/ini-parser';
+import { dedupeRulesetEntries, parseIniConfig } from './parsers/ini-parser';
 import { generateClashConfig } from './generators/clash';
 import { generateSingboxConfig } from './generators/singbox';
 import { generateSurgeConfig } from './generators/surge';
-import type { ClashConfig, ConversionParams, OutputTarget, ParsedIniConfig, RulesetEntry } from './utils/types';
+import type { ClashConfig, ConversionParams, OutputTarget, ParsedIniConfig } from './utils/types';
 import { DEFAULT_PARAMS } from './utils/types';
 import { FRONTEND_HTML } from './frontend/index';
 
@@ -98,23 +98,34 @@ app.get('/sub', async (c: Context) => {
         if (!configResponse.ok) {
           return errorResponse(c, '错误：无法下载规则配置', 502);
         }
-        iniConfig = parseIniConfig(configResponse.text);
+        const parsedConfig = parseIniConfig(configResponse.text);
+        // 相同「策略组 + 规则集 URL」只保留一条，避免重复抓取与重复输出
+        iniConfig = {
+          ...parsedConfig,
+          rulesetEntries: dedupeRulesetEntries(parsedConfig.rulesetEntries),
+        };
 
-        const entries = iniConfig.rulesetEntries
-          .filter((entry: RulesetEntry) => !entry.isSpecial && entry.url)
-          .slice(0, MAX_RULESET_URLS);
-        const results = await mapWithConcurrency(entries, 3, async (entry: RulesetEntry) => {
+        // 同一 URL 只抓取一次（可能被多个策略组引用）
+        const ruleSetUrls: string[] = [];
+        const seenUrls = new Set<string>();
+        for (const entry of iniConfig.rulesetEntries) {
+          if (entry.isSpecial || !entry.url || seenUrls.has(entry.url)) continue;
+          seenUrls.add(entry.url);
+          ruleSetUrls.push(entry.url);
+        }
+
+        const results = await mapWithConcurrency(ruleSetUrls.slice(0, MAX_RULESET_URLS), 3, async (url: string) => {
           try {
-            const ruleResponse = await fetchTextSafe(entry.url, await buildUpstreamHeaders(c), MAX_RULESET_BYTES);
-            if (!ruleResponse.ok) return { url: entry.url, lines: [] as string[] };
+            const ruleResponse = await fetchTextSafe(url, await buildUpstreamHeaders(c), MAX_RULESET_BYTES);
+            if (!ruleResponse.ok) return { url, lines: [] as string[] };
             return {
-              url: entry.url,
+              url,
               lines: ruleResponse.text.split('\n')
                 .map((line: string) => line.trim())
                 .filter((line: string) => line && !line.startsWith('#') && !line.startsWith(';')),
             };
           } catch {
-            return { url: entry.url, lines: [] as string[] };
+            return { url, lines: [] as string[] };
           }
         });
         for (const { url, lines } of results) ruleContents[url] = lines;
@@ -199,6 +210,7 @@ function parseQueryParams(c: Context): ConversionParams {
     scv: parseBool(q.scv) ?? DEFAULT_PARAMS.scv,
     expand: parseBool(q.expand) ?? DEFAULT_PARAMS.expand,
     tls13: parseBool(q.tls13) ?? DEFAULT_PARAMS.tls13,
+    dedup: parseBool(q.dedup) ?? DEFAULT_PARAMS.dedup,
     ua: q.ua || undefined,
   };
 }
