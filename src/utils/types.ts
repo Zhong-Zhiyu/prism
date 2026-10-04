@@ -111,6 +111,19 @@ export interface ConversionParams {
   tls13?: boolean;
   dedup?: boolean;
   ua?: string;
+  /**
+   * 是否输出 TUN 入站（仅 sing-box 目标）。
+   * 默认 true——移动端 sing-box 必须以 TUN 方式运行，关闭后产物只能当本机代理用。
+   */
+  tun?: boolean;
+  /** 显式指定 TUN 的 MTU。默认不输出——该字段在 Apple 平台未实现，由系统/客户端管理 */
+  tun_mtu?: number;
+  /**
+   * GEOIP / GEOSITE 规则的处理方式：
+   *   remote（默认）：输出远程 rule_set，内核启动时会下载，功能完整但依赖网络
+   *   skip：丢弃 geo 规则，生成自包含配置（零运行时下载），LAN 语义仍由内置 ip_is_private 保留
+   */
+  geo_rules?: 'remote' | 'skip';
 }
 
 /** 转换后的输出内容 */

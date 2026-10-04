@@ -1,0 +1,180 @@
+mixed-port: 2080
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9097
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+  default-nameserver:
+    - 223.5.5.5
+  nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+  fallback:
+    - https://1.1.1.1/dns-query
+
+proxies:
+  - name: "HK-01-SS"
+    type: ss
+    server: hk01.fixture.example.com
+    port: 8443
+    cipher: aes-256-gcm
+    password: "ss-password-01"
+    udp: true
+  - name: "JP-02-SSR"
+    type: ssr
+    server: jp02.fixture.example.com
+    port: 8444
+    cipher: aes-256-cfb
+    password: "ssr-password-02"
+    protocol: auth_aes128_md5
+    protocol-param: "123456:abcdef"
+    obfs: tls1.2_ticket_auth
+    obfs-param: "cloud.example.com"
+    udp: true
+  - name: "SG-03-VMess-WS"
+    type: vmess
+    server: sg03.fixture.example.com
+    port: 443
+    uuid: 11111111-2222-3333-4444-555555555555
+    alterId: 0
+    cipher: auto
+    network: ws
+    tls: true
+    servername: sg03.fixture.example.com
+    skip-cert-verify: false
+    ws-opts:
+      path: /ws/path?ed=2048
+      headers:
+        Host: cdn.fixture.example.com
+    alpn: [h2, http/1.1]
+    udp: true
+  - name: "US-04-VLESS-Reality"
+    type: vless
+    server: us04.fixture.example.com
+    port: 443
+    uuid: 66666666-7777-8888-9999-000000000000
+    network: tcp
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: FAKEPUBLICKEYFORFIXTUREONLY0000000000000000
+      short-id: 0123456789abcdef
+    udp: true
+  - name: "DE-05-VLESS-gRPC"
+    type: vless
+    server: de05.fixture.example.com
+    port: 2053
+    uuid: 66666666-7777-8888-9999-000000000001
+    network: grpc
+    tls: true
+    servername: grpc.fixture.example.com
+    grpc-opts:
+      grpc-service-name: prismsvc
+    udp: false
+  - name: "FR-06-Trojan"
+    type: trojan
+    server: fr06.fixture.example.com
+    port: 443
+    password: "trojan-password-06"
+    sni: fr06.fixture.example.com
+    alpn: [h2]
+    skip-cert-verify: true
+    udp: true
+  - name: "KR-07-Hysteria2"
+    type: hysteria2
+    server: kr07.fixture.example.com
+    port: 8443
+    password: "hy2-password-07"
+    sni: kr07.fixture.example.com
+    skip-cert-verify: true
+    up: "100 Mbps"
+    down: "500 Mbps"
+  - name: "NL-08-TUIC"
+    type: tuic
+    server: nl08.fixture.example.com
+    port: 8444
+    uuid: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+    password: "tuic-password-08"
+    sni: nl08.fixture.example.com
+    alpn: [h3]
+    congestion-controller: bbr
+    udp-relay-mode: native
+    skip-cert-verify: true
+  - name: "UK-09-Snell"
+    type: snell
+    server: uk09.fixture.example.com
+    port: 443
+    psk: "snell-psk-09"
+    version: 3
+    obfs-opts:
+      mode: tls
+      host: bing.com
+  - name: "TR-10-AnyTLS"
+    type: anytls
+    server: tr10.fixture.example.com
+    port: 8443
+    password: "anytls-password-10"
+    sni: tr10.fixture.example.com
+    client-fingerprint: chrome
+    alpn: [h2, http/1.1]
+    skip-cert-verify: true
+    udp: true
+  - name: "CA-11-HTTP"
+    type: http
+    server: ca11.fixture.example.com
+    port: 8080
+    username: fixture-user
+    password: fixture-pass
+    tls: false
+  - name: "AU-12-SOCKS5"
+    type: socks5
+    server: au12.fixture.example.com
+    port: 1080
+    username: fixture-user
+    password: fixture-pass
+    udp: true
+
+proxy-groups:
+  - name: "GROUP-AUTO"
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies:
+      - "HK-01-SS"
+      - "SG-03-VMess-WS"
+      - "FR-06-Trojan"
+      - "KR-07-Hysteria2"
+  - name: "GROUP-SELECT"
+    type: select
+    proxies:
+      - "GROUP-AUTO"
+      - DIRECT
+      - "HK-01-SS"
+      - "JP-02-SSR"
+      - "SG-03-VMess-WS"
+      - "US-04-VLESS-Reality"
+      - "DE-05-VLESS-gRPC"
+      - "FR-06-Trojan"
+      - "KR-07-Hysteria2"
+      - "NL-08-TUIC"
+      - "UK-09-Snell"
+      - "TR-10-AnyTLS"
+
+rules:
+  - DOMAIN-SUFFIX,example.com,GROUP-SELECT
+  - DOMAIN-KEYWORD,fixture,GROUP-SELECT
+  - IP-CIDR,198.18.0.0/16,DIRECT,no-resolve
+  - GEOIP,CN,DIRECT
+  - URL-REGEX,^https?://ads\.example\.com/,REJECT
+  - MATCH,GROUP-SELECT

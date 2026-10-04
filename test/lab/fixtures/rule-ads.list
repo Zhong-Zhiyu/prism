@@ -1,0 +1,4 @@
+DOMAIN-SUFFIX,doubleclick.net
+DOMAIN-SUFFIX,googlesyndication.com
+URL-REGEX,^https?://ads\.example\.com/
+USER-AGENT,AdsBot-Google

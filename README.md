@@ -6,13 +6,14 @@ Cross-format proxy subscription converter, deployable to Cloudflare Workers and 
 
 ## Supported Formats
 
-| Format | As Source | As Output |
-|--------|:---------:|:---------:|
-| Clash / Mihomo (YAML) | ✅ | ✅ |
-| sing-box (JSON) | ⚠️ | ⚠️ |
-| Surge (INI) | ⚠️ | ⚠️ |
+| Format | As Source | As Output | Verified with |
+|--------|:---------:|:---------:|---------------|
+| Clash / Mihomo (YAML) | ✅ | ✅ | Clash Verge Rev |
+| sing-box (JSON) | ❌ | ⚠️ | Android ✅ / iOS ❌ |
+| Surge (INI) | ❌ | ⚠️ | Surfboard |
 
-> ⚠️ sing-box and Surge import/export functionality **has not been verified** and may contain compatibility issues.
+> The source subscription must be in Clash / Mihomo YAML format. sing-box JSON and Surge INI are output-only.<br>
+> **Note:** sing-box output has been verified on Android but still fails on iOS (the VPN service cannot be started). Surge output has been verified with Surfboard. See the [verification and maintenance guide](docs/verification-guide.md).
 
 ## Quick Deploy
 
@@ -52,6 +53,30 @@ npm run build        # Bundle for Cloudflare Workers
 npm run build:vercel # Rebuild api/index.js for Vercel
 ```
 
+## Testing
+
+```bash
+npm test          # 139 unit and integration tests, no external dependencies
+npm run check     # tests + type checking + both builds
+```
+
+Output correctness is additionally verified against the `mihomo` and `sing-box` kernels.
+Both binaries are required; see the verification guide for installation instructions.
+
+```bash
+MIHOMO_BIN=~/tools/bin/mihomo SINGBOX_BIN=~/tools/bin/sing-box npm run verify:kernel
+```
+
+If the kernels are not present, the corresponding cases are reported as SKIP rather than
+failure, so the command is safe to run in CI.
+
+Surge output is validated for syntax and reference consistency only. No runtime validation
+path is available in CI; see the verification guide for details.
+
+The [verification and maintenance guide](docs/verification-guide.md) documents the
+kernel-level checks, runtime verification against a real subscription, the local test lab,
+and the checks required after each type of change.
+
 ## Project Structure
 
 ```
@@ -67,6 +92,11 @@ prism/
 │   └── index.js           # Pre-built Vercel function
 ├── scripts/
 │   └── dev-vercel.js      # Local Vercel dev server
+├── test/                  # Unit / integration / fuzz / kernel verification
+│   └── lab/               # Offline test lab (fixtures + local server)
+├── docs/
+│   └── verification-guide.md  # Verification procedures
+├── fonts/                 # Self-hosted webfonts
 ├── public/                # Vercel static placeholder
 ├── vercel.json            # Vercel routing config
 ├── wrangler.toml          # Cloudflare Workers config

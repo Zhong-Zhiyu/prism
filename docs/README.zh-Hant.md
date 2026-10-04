@@ -6,13 +6,14 @@
 
 ## 支援格式
 
-| 格式 | 作為來源 | 作為輸出 |
-|------|:---:|:---:|
-| Clash / Mihomo (YAML) | ✅ | ✅ |
-| sing-box (JSON) | ⚠️ | ⚠️ |
-| Surge (INI) | ⚠️ | ⚠️ |
+| 格式 | 作為來源 | 作為輸出 | 實測客戶端 |
+|------|:---:|:---:|------|
+| Clash / Mihomo (YAML) | ✅ | ✅ | Clash Verge Rev |
+| sing-box (JSON) | ❌ | ⚠️ | Android ✅ / iOS ❌ |
+| Surge (INI) | ❌ | ⚠️ | Surfboard |
 
-> ⚠️ sing-box 與 Surge 的匯入與轉換功能**尚未經過驗證**，可能存有相容性問題。
+> 訂閱來源必須是 Clash / Mihomo YAML 格式；sing-box JSON 與 Surge INI 僅支援作為輸出。<br>
+> **注意：** sing-box 輸出已在 Android 端驗證通過，但 iOS 端仍無法啟動 VPN 服務。Surge 輸出使用 Surfboard 驗證。詳見[驗收與維護手冊](verification-guide.md)。
 
 ## 快速部署
 
@@ -52,6 +53,23 @@ npm run build        # 為 Cloudflare Workers 打包
 npm run build:vercel # 重建 Vercel 用的 api/index.js
 ```
 
+## 測試
+
+```bash
+npm test          # 139 項單元 / 整合測試（無外部相依）
+npm run check     # 測試 + 型別檢查 + 雙目標建置
+```
+
+產物還會與真實的 `mihomo` 與 `sing-box` 核心做校驗（需要這兩個二進位檔，取得方式見驗收與維護手冊）：
+
+```bash
+MIHOMO_BIN=~/tools/bin/mihomo SINGBOX_BIN=~/tools/bin/sing-box npm run verify:kernel
+```
+
+缺少核心時會標記為 SKIP 而非失敗，因此可安全用於 CI。
+
+**[驗收與維護手冊](verification-guide.md)** 說明了核心級校驗、真實訂閱實跑、本機測試台的搭建方法，以及各類改動後應執行的檢查。
+
 ## 專案結構
 
 ```
@@ -67,6 +85,11 @@ prism/
 │   └── index.js           # 預構建的 Vercel 函式
 ├── scripts/
 │   └── dev-vercel.js      # 本地 Vercel 開發伺服器
+├── test/                  # 單元 / 整合 / 模糊 / 核心校驗
+│   └── lab/               # 離線測試台（夾具 + 本機伺服器）
+├── docs/
+│   └── verification-guide.md  # 驗收與維護手冊
+├── fonts/                 # 自架字型
 ├── public/                # Vercel 靜態佔位目錄
 ├── vercel.json            # Vercel 路由設定
 ├── wrangler.toml          # Cloudflare Workers 設定

@@ -126,7 +126,17 @@ export function expandRulesetEntries(
  * 裁剪规则序列：顺序敏感，只删除后出现的冗余条目，保留首条原文。
  * 以 `#` 开头的条目视为注释，原样保留且不参与判定。
  */
-export function pruneRules(rules: string[]): RulePruneResult {
+export interface PruneOptions {
+  /**
+   * 是否在遇到 MATCH / FINAL 后丢弃后续规则（默认 true，符合单份配置的求值语义）。
+   * 多订阅合并场景应关闭：各订阅的规则是拼接的，前一份订阅的终止规则
+   * 不应把后一份订阅的规则整批删掉。
+   */
+  stopAtTerminal?: boolean;
+}
+
+export function pruneRules(rules: string[], options: PruneOptions = {}): RulePruneResult {
+  const stopAtTerminal = options.stopAtTerminal !== false;
   const stats: RulePruneStats = {
     input: rules.length,
     kept: 0,
@@ -170,7 +180,7 @@ export function pruneRules(rules: string[]): RulePruneResult {
 
     if (TERMINAL_TYPES.has(parsed.type)) {
       kept.push(rule);
-      terminalReached = true;
+      if (stopAtTerminal) terminalReached = true;
       continue;
     }
 
@@ -264,8 +274,8 @@ export function pruneRules(rules: string[]): RulePruneResult {
 /**
  * 裁剪规则序列并输出统计日志（仅在真正发生删除时打印）
  */
-export function pruneRulesWithLog(rules: string[]): string[] {
-  const { rules: kept, stats } = pruneRules(rules);
+export function pruneRulesWithLog(rules: string[], options: PruneOptions = {}): string[] {
+  const { rules: kept, stats } = pruneRules(rules, options);
   if (stats.removed > 0) {
     console.log(
       `[Prism] 规则裁剪: 输入 ${stats.input} 条 → 保留 ${stats.kept} 条` +

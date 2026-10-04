@@ -80,7 +80,13 @@ app.get('/sub', async (c: Context) => {
       }
       sourceConfig = mergeConfigs(results);
     } catch (err) {
-      console.error('下载或解析订阅失败:', (err as Error).message);
+      const message = (err as Error).message;
+      console.error('下载或解析订阅失败:', message);
+      // 订阅本身能下载但内容不可用（例如没有代理节点、不是 Clash 配置）
+      // 属于客户端问题，返回 400 而不是 502
+      if (/未找到有效代理节点|不是有效的 YAML|必须是 YAML 对象|rules 字段格式无效|订阅配置过大/.test(message)) {
+        return errorResponse(c, `错误：${message}`, 400);
+      }
       return errorResponse(c, '错误：下载或解析订阅失败，请检查链接或稍后重试', 502);
     }
 
@@ -212,6 +218,9 @@ function parseQueryParams(c: Context): ConversionParams {
     tls13: parseBool(q.tls13) ?? DEFAULT_PARAMS.tls13,
     dedup: parseBool(q.dedup) ?? DEFAULT_PARAMS.dedup,
     ua: q.ua || undefined,
+    geo_rules: q.geo_rules === 'skip' ? 'skip' : q.geo_rules === 'remote' ? 'remote' : undefined,
+    tun: parseBool(q.tun),
+    tun_mtu: parsePositiveInt(q.tun_mtu),
   };
 }
 
@@ -461,3 +470,11 @@ function utf8ToBase64(str: string): string {
 }
 
 export default app;
+
+/** 解析正整数参数，非法或缺失返回 undefined */
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (value === undefined || value === null || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.floor(parsed);
+}

@@ -10,10 +10,13 @@
     "build": "esbuild src/worker.ts --bundle --outfile=dist/worker.js --format=esm --target=es2022",
     "build:vercel": "esbuild src/vercel.ts --bundle --outfile=api/index.js --format=esm --platform=node --target=node18 --external:'hono/*' --external:js-yaml",
     "dev:vercel": "node scripts/dev-vercel.js",
-    "test": "node -e \"require('node:fs').rmSync('.tmp-tests',{recursive:true,force:true});require('node:fs').mkdirSync('.tmp-tests',{recursive:true})\" && esbuild test/core.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/core.test.mjs && node --test .tmp-tests/core.test.mjs",
+    "test": "node -e \"require('node:fs').rmSync('.tmp-tests',{recursive:true,force:true});require('node:fs').mkdirSync('.tmp-tests',{recursive:true})\" && esbuild test/core.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/core.test.mjs && esbuild test/fuzz.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/fuzz.test.mjs && esbuild test/worker.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/worker.test.mjs && esbuild test/rules.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/rules.test.mjs && esbuild test/consistency.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/consistency.test.mjs && esbuild test/errors.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/errors.test.mjs && esbuild test/transport.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/transport.test.mjs && esbuild test/naming.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/naming.test.mjs && node --test .tmp-tests/core.test.mjs .tmp-tests/fuzz.test.mjs .tmp-tests/worker.test.mjs .tmp-tests/rules.test.mjs .tmp-tests/consistency.test.mjs .tmp-tests/errors.test.mjs .tmp-tests/transport.test.mjs .tmp-tests/naming.test.mjs",
     "check": "npm run test && npx tsc --noEmit && npm run build && npm run build:vercel",
-    "verify:mihomo": "node scripts/verify-mihomo.js",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git config core.hooksPath .githooks",
+    "verify:kernel": "esbuild test/kernel/verify-kernel.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/verify-kernel.mjs && node .tmp-tests/verify-kernel.mjs",
+    "lab:build": "npm run build && node test/lab/patch-lab.mjs",
+    "lab": "node test/lab/lab-server.mjs",
+    "lab:matrix": "bash test/lab/run-matrix.sh"
   },
   "engines": {
     "node": ">=18.17"

@@ -6,13 +6,14 @@
 
 ## فرمت‌های پشتیبانی‌شده
 
-| فرمت | به‌عنوان منبع | به‌عنوان خروجی |
-|------|:---:|:---:|
-| Clash / Mihomo (YAML) | ✅ | ✅ |
-| sing-box (JSON) | ⚠️ | ⚠️ |
-| Surge (INI) | ⚠️ | ⚠️ |
+| قالب | به‌عنوان منبع | به‌عنوان خروجی | بررسی با |
+|------|:---:|:---:|------|
+| Clash / Mihomo (YAML) | ✅ | ✅ | Clash Verge Rev |
+| sing-box (JSON) | ❌ | ⚠️ | Android ✅ / iOS ❌ |
+| Surge (INI) | ❌ | ⚠️ | Surfboard |
 
-> ⚠️ قابلیت ورودی و خروجی برای sing-box و Surge **هنوز تأیید نشده** و ممکن است مشکلات سازگاری داشته باشد.
+> منبع اشتراک باید در قالب Clash / Mihomo YAML باشد. sing-box JSON و Surge INI فقط برای خروجی هستند.<br>
+> **توجه:** خروجی sing-box روی Android تأیید شده است، اما سرویس VPN در iOS راه‌اندازی نمی‌شود. خروجی Surge با Surfboard بررسی شده است. [راهنمای بررسی و نگهداری](verification-guide.md) را ببینید.
 
 ## استقرار سریع
 
@@ -52,6 +53,24 @@ npm run build        # بسته‌بندی برای Cloudflare Workers
 npm run build:vercel # بازسازی api/index.js برای Vercel
 ```
 
+## آزمون
+
+```bash
+npm test          # ۱۳۹ آزمون واحد / یکپارچگی (بدون وابستگی خارجی)
+npm run check     # آزمون‌ها + بررسی نوع + هر دو ساخت
+```
+
+خروجی همچنین با هسته‌های واقعی `mihomo` و `sing-box` بررسی می‌شود
+(به هر دو فایل اجرایی نیاز است؛ روش تهیه در راهنمای بررسی آمده است):
+
+```bash
+MIHOMO_BIN=~/tools/bin/mihomo SINGBOX_BIN=~/tools/bin/sing-box npm run verify:kernel
+```
+
+اگر هسته موجود نباشد، نتیجه به‌جای شکست با SKIP علامت‌گذاری می‌شود، بنابراین برای CI بی‌خطر است.
+
+**[راهنمای بررسی و نگهداری](verification-guide.md)** روش بررسی در سطح هسته، بررسی عملی با اشتراک واقعی، ساخت آزمایشگاه محلی، و آزمون‌های لازم پس از هر نوع تغییر را توضیح می‌دهد.
+
 ## ساختار پروژه
 
 ```
@@ -67,6 +86,11 @@ prism/
 │   └── index.js           # تابع Vercel از پیش ساخته شده
 ├── scripts/
 │   └── dev-vercel.js      # سرور توسعه محلی Vercel
+├── test/                  # آزمون واحد / یکپارچگی / فاز / هسته
+│   └── lab/               # آزمایشگاه محلی (فیکسچر + سرور)
+├── docs/
+│   └── verification-guide.md  # راهنمای بررسی و نگهداری
+├── fonts/                 # فونت‌های میزبانی‌شده
 ├── public/                # دایرکتوری استاتیک Vercel
 ├── vercel.json            # پیکربندی مسیریابی Vercel
 ├── wrangler.toml          # پیکربندی Cloudflare Workers

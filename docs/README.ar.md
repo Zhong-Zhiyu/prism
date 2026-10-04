@@ -6,13 +6,14 @@
 
 ## الصيغ المدعومة
 
-| الصيغة | كمصدر | كمخرج |
-|------|:---:|:---:|
-| Clash / Mihomo (YAML) | ✅ | ✅ |
-| sing-box (JSON) | ⚠️ | ⚠️ |
-| Surge (INI) | ⚠️ | ⚠️ |
+| الصيغة | كمصدر | كمخرج | تم التحقق بواسطة |
+|--------|:---:|:---:|------|
+| Clash / Mihomo (YAML) | ✅ | ✅ | Clash Verge Rev |
+| sing-box (JSON) | ❌ | ⚠️ | Android ✅ / iOS ❌ |
+| Surge (INI) | ❌ | ⚠️ | Surfboard |
 
-> ⚠️ وظائف الاستيراد والتصدير لـ sing-box و Surge **لم يتم التحقق منها بعد** وقد تحتوي على مشكلات توافق.
+> يجب أن يكون مصدر الاشتراك بصيغة Clash / Mihomo YAML. صيغتا sing-box JSON و Surge INI للإخراج فقط.<br>
+> **ملاحظة:** تم التحقق من مخرجات sing-box على Android، لكن خدمة VPN لا تعمل على iOS. تم التحقق من مخرجات Surge باستخدام Surfboard. راجع [دليل التحقق والصيانة](verification-guide.md).
 
 ## النشر السريع
 
@@ -52,6 +53,24 @@ npm run build        # حزمة لـ Cloudflare Workers
 npm run build:vercel # إعادة بناء api/index.js لـ Vercel
 ```
 
+## الاختبار
+
+```bash
+npm test          # 139 اختبار وحدة / تكامل (بدون تبعيات خارجية)
+npm run check     # الاختبارات + فحص الأنواع + كلا البناءين
+```
+
+يتم التحقق من المخرجات أيضًا باستخدام نواة `mihomo` و`sing-box` الحقيقية
+(يلزم توفر الملفين التنفيذيين؛ طريقة الحصول عليهما في دليل التحقق):
+
+```bash
+MIHOMO_BIN=~/tools/bin/mihomo SINGBOX_BIN=~/tools/bin/sing-box npm run verify:kernel
+```
+
+إذا لم تكن النواة متوفرة، تُعلَّم النتيجة بـ SKIP وليس بالفشل، لذا فهي آمنة في CI.
+
+**[دليل التحقق والصيانة](verification-guide.md)** يشرح التحقق على مستوى النواة، والتحقق الفعلي باستخدام اشتراك حقيقي، وبناء مختبر محلي، والفحوصات المطلوبة بعد كل نوع من التغييرات.
+
 ## هيكل المشروع
 
 ```
@@ -67,6 +86,11 @@ prism/
 │   └── index.js           # دالة Vercel مبنية مسبقًا
 ├── scripts/
 │   └── dev-vercel.js      # خادم تطوير Vercel المحلي
+├── test/                  # اختبارات الوحدة / التكامل / الضبابية / النواة
+│   └── lab/               # مختبر محلي (بيانات ثابتة + خادم)
+├── docs/
+│   └── verification-guide.md  # دليل التحقق والصيانة
+├── fonts/                 # خطوط مستضافة ذاتيًا
 ├── public/                # عنصر نائب ثابت لـ Vercel
 ├── vercel.json            # إعدادات توجيه Vercel
 ├── wrangler.toml          # إعدادات Cloudflare Workers

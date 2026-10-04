@@ -2244,92 +2244,6 @@ var init_dist = __esm({
   }
 });
 
-// node_modules/hono/dist/utils/cookie.js
-var validCookieNameRegEx, validCookieValueRegEx, trimCookieWhitespace, parse;
-var init_cookie = __esm({
-  "node_modules/hono/dist/utils/cookie.js"() {
-    init_url();
-    validCookieNameRegEx = /^[\w!#$%&'*.^`|~+-]+$/;
-    validCookieValueRegEx = /^[ !#-:<-[\]-~]*$/;
-    trimCookieWhitespace = (value) => {
-      let start = 0;
-      let end = value.length;
-      while (start < end) {
-        const charCode = value.charCodeAt(start);
-        if (charCode !== 32 && charCode !== 9) {
-          break;
-        }
-        start++;
-      }
-      while (end > start) {
-        const charCode = value.charCodeAt(end - 1);
-        if (charCode !== 32 && charCode !== 9) {
-          break;
-        }
-        end--;
-      }
-      return start === 0 && end === value.length ? value : value.slice(start, end);
-    };
-    parse = (cookie, name) => {
-      if (name && cookie.indexOf(name) === -1) {
-        return {};
-      }
-      const pairs = cookie.split(";");
-      const parsedCookie = /* @__PURE__ */ Object.create(null);
-      for (const pairStr of pairs) {
-        const valueStartPos = pairStr.indexOf("=");
-        if (valueStartPos === -1) {
-          continue;
-        }
-        const cookieName = trimCookieWhitespace(pairStr.substring(0, valueStartPos));
-        if (name && name !== cookieName || !validCookieNameRegEx.test(cookieName) || cookieName in parsedCookie) {
-          continue;
-        }
-        let cookieValue = trimCookieWhitespace(pairStr.substring(valueStartPos + 1));
-        if (cookieValue.startsWith('"') && cookieValue.endsWith('"')) {
-          cookieValue = cookieValue.slice(1, -1);
-        }
-        if (validCookieValueRegEx.test(cookieValue)) {
-          parsedCookie[cookieName] = cookieValue.indexOf("%") !== -1 ? tryDecode(cookieValue, decodeURIComponent_) : cookieValue;
-          if (name) {
-            break;
-          }
-        }
-      }
-      return parsedCookie;
-    };
-  }
-});
-
-// node_modules/hono/dist/helper/cookie/index.js
-var getCookie;
-var init_cookie2 = __esm({
-  "node_modules/hono/dist/helper/cookie/index.js"() {
-    init_cookie();
-    getCookie = (c, key, prefix) => {
-      const cookie = c.req.raw.headers.get("Cookie");
-      if (typeof key === "string") {
-        if (!cookie) {
-          return void 0;
-        }
-        let finalKey = key;
-        if (prefix === "secure") {
-          finalKey = "__Secure-" + key;
-        } else if (prefix === "host") {
-          finalKey = "__Host-" + key;
-        }
-        const obj2 = parse(cookie, finalKey);
-        return obj2[finalKey];
-      }
-      if (!cookie) {
-        return {};
-      }
-      const obj = parse(cookie);
-      return obj;
-    };
-  }
-});
-
 // src/utils/target-support.ts
 function normalizeRulesForClash(rules) {
   return rules.map(
@@ -2695,6 +2609,7 @@ function prepareNodes(nodes, params) {
   const displayNames = /* @__PURE__ */ new Map();
   const renamed = [];
   const seen = /* @__PURE__ */ new Set();
+  const usedDisplayNames = /* @__PURE__ */ new Set();
   for (const original of filtered) {
     if (seen.has(original.name)) continue;
     seen.add(original.name);
@@ -2703,20 +2618,30 @@ function prepareNodes(nodes, params) {
       name = name.replace(rule.pattern, rule.replacement);
     }
     const renamedNode = name === original.name ? original : { ...original, name };
-    const displayName = getDisplayName(renamedNode, params);
+    let displayName = getDisplayName(renamedNode, params);
+    if (usedDisplayNames.has(displayName)) {
+      const base = displayName;
+      let suffix = 2;
+      while (usedDisplayNames.has(`${base}-${suffix}`)) suffix++;
+      displayName = `${base}-${suffix}`;
+    }
+    usedDisplayNames.add(displayName);
     displayNames.set(original.name, displayName);
     renamed.push({ ...renamedNode, name: displayName });
   }
   return { nodes: renamed, displayNames, allNames: [...displayNames.values()] };
 }
+function stripEmoji(name) {
+  const stripped = name.replace(EMOJI_PATTERN, "").replace(/\s{2,}/g, " ").trim();
+  return stripped || name.trim();
+}
 function getDisplayName(node, params) {
-  let name = node.name;
-  if (params.emoji === false) name = name.replace(/[\u{1F000}-\u{1FFFF}]/gu, "").trim();
+  let name = params.emoji === false ? stripEmoji(node.name) : node.name;
   if (params.append_type) name = `[${node.type.toUpperCase()}] ${name}`;
   return name;
 }
 function mapNodeReference(name, displayNames) {
-  return displayNames.get(name) || name;
+  return displayNames.has(name) ? displayNames.get(name) : name;
 }
 function parseClashRule(rule) {
   const parts = rule.split(",").map((part) => part.trim()).filter(Boolean);
@@ -2734,21 +2659,58 @@ function parseClashRule(rule) {
 }
 function parseRenameRules(value) {
   if (!value) return [];
-  const rawRules = value.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean);
-  const rules = rawRules.length > 1 ? rawRules : value.split("|").map((rule) => rule.trim()).filter(Boolean);
-  return rules.flatMap((rule) => {
+  const parseOne = (rule) => {
     const index = rule.lastIndexOf("@");
-    if (index <= 0) return [];
+    if (index <= 0) return null;
+    const patternText = rule.slice(0, index);
+    if (patternText.includes("@")) return null;
     try {
-      return [{ pattern: new RegExp(rule.slice(0, index)), replacement: rule.slice(index + 1) }];
+      return { pattern: new RegExp(patternText), replacement: rule.slice(index + 1) };
     } catch {
-      return [];
+      return null;
     }
-  });
+  };
+  const byLine = value.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean);
+  if (byLine.length > 1) {
+    return byLine.flatMap((rule) => parseOne(rule) ?? []);
+  }
+  const single = value.trim();
+  const whole = parseOne(single);
+  if (whole) return [whole];
+  const segments = single.split("|").map((rule) => rule.trim()).filter(Boolean);
+  const parsed = segments.map(parseOne);
+  if (segments.length > 1 && parsed.every((item) => item !== null)) {
+    return parsed;
+  }
+  return [];
 }
+function isValidProxyNode(node) {
+  if (!node || typeof node !== "object") return false;
+  if (typeof node.name !== "string" || node.name.trim() === "") return false;
+  if (typeof node.server !== "string" || node.server.trim() === "") return false;
+  if (!Number.isInteger(node.port) || node.port < 1 || node.port > 65535) return false;
+  if (typeof node.type !== "string" || node.type.trim() === "") return false;
+  if (/[\s,"'=]/.test(node.server)) return false;
+  return true;
+}
+function filterValidNodes(nodes) {
+  const kept = [];
+  const dropped = /* @__PURE__ */ new Map();
+  for (const node of nodes) {
+    if (isValidProxyNode(node)) {
+      kept.push(node);
+      continue;
+    }
+    const type = node && typeof node.type === "string" && node.type ? node.type : "(\u672A\u77E5)";
+    dropped.set(type, (dropped.get(type) ?? 0) + 1);
+  }
+  return { nodes: kept, dropped };
+}
+var EMOJI_PATTERN;
 var init_node_utils = __esm({
   "src/utils/node-utils.ts"() {
     "use strict";
+    EMOJI_PATTERN = /[\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u200D\u20E3\u{1F3FB}-\u{1F3FF}]/gu;
   }
 });
 
@@ -2785,7 +2747,8 @@ function expandRulesetEntries(iniConfig, ruleContents, finalType, onMissingConte
   }
   return rules;
 }
-function pruneRules(rules) {
+function pruneRules(rules, options = {}) {
+  const stopAtTerminal = options.stopAtTerminal !== false;
   const stats = {
     input: rules.length,
     kept: 0,
@@ -2823,7 +2786,7 @@ function pruneRules(rules) {
     }
     if (TERMINAL_TYPES.has(parsed.type)) {
       kept.push(rule);
-      terminalReached = true;
+      if (stopAtTerminal) terminalReached = true;
       continue;
     }
     const value = parsed.value.trim();
@@ -2898,8 +2861,8 @@ function pruneRules(rules) {
   stats.removed = stats.input - stats.kept;
   return { rules: kept, stats };
 }
-function pruneRulesWithLog(rules) {
-  const { rules: kept, stats } = pruneRules(rules);
+function pruneRulesWithLog(rules, options = {}) {
+  const { rules: kept, stats } = pruneRules(rules, options);
   if (stats.removed > 0) {
     console.log(
       `[Prism] \u89C4\u5219\u88C1\u526A: \u8F93\u5165 ${stats.input} \u6761 \u2192 \u4FDD\u7559 ${stats.kept} \u6761\uFF08\u91CD\u590D ${stats.duplicate}\u3001\u57DF\u540D\u8986\u76D6 ${stats.domainCovered}\u3001\u5173\u952E\u5B57\u8986\u76D6 ${stats.keywordCovered}\u3001\u7F51\u6BB5\u5305\u542B ${stats.cidrCovered}\u3001FINAL \u4E4B\u540E ${stats.afterTerminal}\uFF09`
@@ -3042,17 +3005,31 @@ var init_rule_pruner = __esm({
 });
 
 // src/generators/clash.ts
+import yaml2 from "js-yaml";
 function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
   const lines = [];
   lines.push("# ====================================");
   lines.push("# Prism - \u8BA2\u9605\u8F6C\u6362\u5DE5\u5177");
   lines.push("# ====================================");
   lines.push("");
-  const prepared = prepareNodes(sourceConfig.proxies, params);
+  const { nodes: validProxies, dropped: droppedNodes } = filterValidNodes(sourceConfig.proxies || []);
+  if (droppedNodes.size > 0) {
+    const detail = [...droppedNodes.entries()].map(([type, count]) => `${type}\xD7${count}`).join("\u3001");
+    console.warn(`[Prism] \u5DF2\u8DF3\u8FC7 ${[...droppedNodes.values()].reduce((a, b) => a + b, 0)} \u4E2A\u5B57\u6BB5\u4E0D\u5B8C\u6574\u7684\u8282\u70B9: ${detail}`);
+  }
+  const prepared = prepareNodes(validProxies, params);
   const allNodes = prepared.nodes;
   const allNodeNames = prepared.allNames;
   const nodeNameMap = prepared.displayNames;
-  const RESERVED_KEYS = /* @__PURE__ */ new Set(["proxies", "proxy-groups", "rules", "dns", "hosts"]);
+  const globalFingerprint = typeof sourceConfig["global-client-fingerprint"] === "string" && sourceConfig["global-client-fingerprint"] ? sourceConfig["global-client-fingerprint"] : void 0;
+  if (globalFingerprint) {
+    for (const node of allNodes) {
+      if (node["client-fingerprint"] === void 0) {
+        node["client-fingerprint"] = globalFingerprint;
+      }
+    }
+  }
+  const RESERVED_KEYS = /* @__PURE__ */ new Set(["proxies", "proxy-groups", "rules", "dns", "hosts", "global-client-fingerprint"]);
   for (const [key, value] of Object.entries(sourceConfig)) {
     if (value === void 0 || value === null) continue;
     if (!RESERVED_KEYS.has(key)) {
@@ -3067,48 +3044,14 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
       lines.push(`# \u5171 ${allNodes.length} \u4E2A\u4EE3\u7406\u8282\u70B9`);
       continue;
     }
-    if (key === "proxy-groups") {
-      if (params.config) {
-        lines.push("proxy-groups:");
-        const groups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
-        for (const g of groups) {
-          writeProxyGroup(
-            lines,
-            g.groupType || "select",
-            g.name,
-            g.proxies,
-            g.url,
-            g.interval,
-            allNodeNames,
-            iniConfig.customProxyGroups.map((og) => og.name),
-            nodeNameMap
-          );
-        }
-      } else if (Array.isArray(value) && value.length > 0) {
-        lines.push("proxy-groups:");
-        const groups = value;
-        for (const g of groups) {
-          writeProxyGroup(
-            lines,
-            g.type || "select",
-            g.name,
-            g.proxies,
-            g.url,
-            g.interval,
-            allNodeNames,
-            groups.map((og) => og.name),
-            nodeNameMap
-          );
-        }
-      }
-      continue;
-    }
+    if (key === "proxy-groups") continue;
     if (key === "rules") {
       const sourceRules = Array.isArray(value) ? value.filter((rule) => typeof rule === "string") : [];
       if (iniConfig.rulesetEntries.length > 0) {
         if (params.expand !== false) {
+          const sourceNonTerminal = iniConfig.overwriteOriginalRules ? [] : sourceRules.filter((rule) => !isTerminalRule(rule));
           const rawRules = [
-            ...iniConfig.overwriteOriginalRules ? [] : sourceRules,
+            ...sourceNonTerminal,
             ...expandRulesetEntries(
               iniConfig,
               ruleContents,
@@ -3116,45 +3059,47 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
               (entry) => `# \u26A0 \u89C4\u5219\u96C6\u4E0B\u8F7D\u5931\u8D25: ${entry.groupName}`
             )
           ];
-          const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
-          writeClashRules(lines, rules);
+          const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules, { stopAtTerminal: false });
+          writeClashRules(lines, rules, nodeNameMap);
         } else {
           const deduped = dedupeRulesetEntries(iniConfig.rulesetEntries);
           const entries = params.dedup === false ? deduped : truncateRulesetsAfterFinal(deduped);
           const { providers, names } = planRuleProviders(entries, ruleContents);
-          lines.push("rule-providers:");
-          for (const provider of providers) {
-            lines.push(`  ${provider.name}:`);
-            lines.push(`    type: http`);
-            lines.push(`    behavior: ${provider.behavior}`);
-            lines.push(`    url: "${esc(provider.url)}"`);
-            lines.push(`    interval: 86400`);
+          if (providers.length > 0) {
+            lines.push("rule-providers:");
+            for (const provider of providers) {
+              lines.push(`  ${provider.name}:`);
+              lines.push(`    type: http`);
+              lines.push(`    behavior: ${provider.behavior}`);
+              lines.push(`    url: "${esc(provider.url)}"`);
+              lines.push(`    interval: 86400`);
+            }
           }
           lines.push("rules:");
           for (const entry of entries) {
+            const target = nodeNameMap.get(entry.groupName) || entry.groupName;
             if (entry.isSpecial) {
               if (entry.specialType === "GEOIP" && entry.specialValue) {
-                lines.push(`  - GEOIP,${entry.specialValue},${entry.groupName}`);
+                lines.push(`  - GEOIP,${entry.specialValue},${target}`);
               } else if (entry.specialType === "FINAL") {
-                lines.push(`  - MATCH,${entry.groupName}`);
+                lines.push(`  - MATCH,${target}`);
               }
             } else if (entry.url) {
-              lines.push(`  - RULE-SET,${names.get(entry.url)},${entry.groupName}`);
+              lines.push(`  - RULE-SET,${names.get(entry.url)},${target}`);
             }
           }
         }
       } else if (sourceRules.length > 0) {
-        const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
-        writeClashRules(lines, rules);
+        const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules, { stopAtTerminal: false });
+        writeClashRules(lines, rules, nodeNameMap);
       }
       continue;
     }
     if (key === "dns") {
-      if (typeof value === "object" && value !== null && Object.keys(value).length > 0) {
+      const dns = migrateClashDns(value);
+      if (dns && Object.keys(dns).length > 0) {
         lines.push("dns:");
-        for (const [dk, dv] of Object.entries(value)) {
-          emitYamlKeyValue(lines, dk, dv, 2);
-        }
+        lines.push(indentYaml(yaml2.dump(dns, { lineWidth: -1, noRefs: true }).replace(/\n$/, ""), 2));
       }
       continue;
     }
@@ -3173,7 +3118,39 @@ function generateClashConfig(sourceConfig, iniConfig, params, ruleContents) {
       continue;
     }
   }
+  emitProxyGroups(lines, sourceConfig, iniConfig, params, allNodeNames, nodeNameMap);
+  appendSyntheticGroups(lines, sourceConfig, iniConfig, params, ruleContents, allNodeNames, nodeNameMap);
   return lines.join("\n");
+}
+function collectDefinedGroupNames(lines) {
+  const names = /* @__PURE__ */ new Set();
+  for (const line of lines) {
+    const match2 = line.match(/^\s*-\s*\{\s*name:\s*"((?:[^"\\]|\\.)*)"\s*,\s*type:/);
+    if (match2) names.add(match2[1].replace(/\\"/g, '"'));
+  }
+  return names;
+}
+function appendSyntheticGroups(lines, sourceConfig, iniConfig, params, ruleContents, allNodeNames, nodeNameMap) {
+  if (allNodeNames.length === 0) return;
+  const defined = collectDefinedGroupNames(lines);
+  const builtin = /* @__PURE__ */ new Set(["DIRECT", "REJECT", "REJECT-DROP", "REJECT-TLS", "PASS", "COMPATIBLE", "GLOBAL"]);
+  const nodeNames = new Set(allNodeNames);
+  const missing = [];
+  for (const target of collectRuleTargets(sourceConfig, iniConfig, params, ruleContents, nodeNameMap)) {
+    if (!target || defined.has(target) || nodeNames.has(target) || builtin.has(target.toUpperCase())) continue;
+    if (missing.includes(target)) continue;
+    missing.push(target);
+  }
+  if (missing.length === 0) return;
+  const rulesIndex = lines.findIndex((line) => line.trimEnd() === "rules:");
+  const insertAt = rulesIndex === -1 ? lines.length : rulesIndex;
+  const block = [];
+  const hasGroupSection = lines.some((line) => line.trimEnd() === "proxy-groups:");
+  if (!hasGroupSection) block.push("proxy-groups:");
+  for (const name of missing) {
+    block.push(`  - { name: "${esc(name)}", type: select, proxies: [${allNodeNames.map((n) => `"${esc(n)}"`).join(", ")}] }`);
+  }
+  lines.splice(insertAt, 0, ...block);
 }
 function getNodeDisplayName(node, _params) {
   return node.name;
@@ -3257,7 +3234,7 @@ function writeProxyGroup(lines, groupType, name, proxies, url, interval, allNode
   let filtered = proxies.filter(
     (p) => p === "DIRECT" || p === "REJECT" || p === "REJECT-TLS" || allNodeNames.includes(p) || groupNames.includes(p) || nodeNameMap && nodeNameMap.has(p)
   );
-  if (filtered.length === 0) filtered = ["DIRECT"];
+  if (filtered.length === 0) filtered = allNodeNames.length > 0 ? [...allNodeNames] : ["DIRECT"];
   if (nodeNameMap) filtered = filtered.map((p) => nodeNameMap.get(p) || p);
   const parts = [];
   parts.push(`name: "${esc(name)}"`);
@@ -3278,8 +3255,9 @@ function formatRule(rule) {
   }
   return rule;
 }
-function writeClashRules(lines, rules) {
-  const normalized = normalizeRulesForClash(rules);
+function writeClashRules(lines, rules, nodeNameMap) {
+  const mapped = nodeNameMap ? rules.map((rule) => mapRuleTarget(rule, nodeNameMap)) : rules;
+  const normalized = normalizeRulesForClash(mapped);
   const { rules: supported, dropped } = filterSupportedRules(normalized, MIHOMO_RULE_TYPES);
   lines.push("rules:");
   for (const rule of supported) {
@@ -3335,6 +3313,140 @@ function emitYamlKeyValue(lines, key, value, indent) {
     lines.push(`${pad}${safe}: ${value}`);
   }
 }
+function migrateClashDns(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const dns = { ...value };
+  if (dns["fallback-filter"] === void 0) return dns;
+  const filter = dns["fallback-filter"];
+  delete dns["fallback-filter"];
+  if (!filter || typeof filter !== "object" || Array.isArray(filter)) return dns;
+  const { geosite, geoip, ipcidr, domain } = filter;
+  const policy = { ...dns["nameserver-policy"] };
+  const targets = [];
+  if (typeof geosite === "string" && geosite) targets.push(`geosite:${geosite}`);
+  for (const item of toStringArray(domain)) targets.push(item);
+  for (const item of toStringArray(ipcidr)) targets.push(item);
+  if (typeof geoip === "string" && geoip) targets.push(`geoip:${geoip}`);
+  const fallback = toStringArray(dns.fallback);
+  if (targets.length > 0 && fallback.length > 0) {
+    for (const target of targets) policy[target] = fallback;
+    dns["nameserver-policy"] = policy;
+  }
+  return dns;
+}
+function toStringArray(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+function indentYaml(text, spaces) {
+  const pad = " ".repeat(spaces);
+  return text.split("\n").map((line) => line ? pad + line : line).join("\n");
+}
+function collectRuleTargets(sourceConfig, iniConfig, params, ruleContents, nodeNameMap) {
+  const sourceRules = Array.isArray(sourceConfig.rules) ? sourceConfig.rules.filter((rule) => typeof rule === "string") : [];
+  let rawRules;
+  if (iniConfig.rulesetEntries.length > 0) {
+    if (params.expand !== false) {
+      rawRules = [
+        ...iniConfig.overwriteOriginalRules ? [] : sourceRules,
+        ...expandRulesetEntries(
+          iniConfig,
+          ruleContents,
+          "MATCH",
+          (entry) => `# \u26A0 \u89C4\u5219\u96C6\u4E0B\u8F7D\u5931\u8D25: ${entry.groupName}`
+        )
+      ];
+    } else {
+      const entries = dedupeRulesetEntries(iniConfig.rulesetEntries);
+      const truncated = params.dedup === false ? entries : truncateRulesetsAfterFinal(entries);
+      rawRules = truncated.map((entry) => {
+        if (entry.isSpecial) {
+          if (entry.specialType === "GEOIP" && entry.specialValue) {
+            return `GEOIP,${entry.specialValue},${entry.groupName}`;
+          }
+          return `MATCH,${entry.groupName}`;
+        }
+        return `RULE-SET,${entry.url},${entry.groupName}`;
+      });
+    }
+  } else {
+    rawRules = sourceRules;
+  }
+  const keepSourceRules = !iniConfig.overwriteOriginalRules && !(iniConfig.rulesetEntries.length > 0 && params.expand === false);
+  const allRules = keepSourceRules ? [...sourceRules, ...rawRules] : rawRules;
+  const targets = [];
+  for (const rule of allRules) {
+    if (!rule || rule.startsWith("#")) continue;
+    const parsed = parseClashRule(rule);
+    if (!parsed) continue;
+    const mapped = nodeNameMap.get(parsed.target);
+    targets.push(mapped || parsed.target);
+  }
+  return targets;
+}
+function emitProxyGroups(lines, sourceConfig, iniConfig, params, allNodeNames, nodeNameMap) {
+  const block = [];
+  if (params.config && iniConfig.customProxyGroups.length > 0) {
+    const groups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
+    block.push("proxy-groups:");
+    for (const group of groups) {
+      writeProxyGroup(
+        block,
+        group.groupType || "select",
+        group.name,
+        group.proxies,
+        group.url,
+        group.interval,
+        allNodeNames,
+        groups.map((item) => item.name),
+        nodeNameMap
+      );
+    }
+  } else {
+    const sourceGroups = sourceConfig["proxy-groups"];
+    if (!Array.isArray(sourceGroups) || sourceGroups.length === 0) return;
+    block.push("proxy-groups:");
+    for (const group of sourceGroups) {
+      writeProxyGroup(
+        block,
+        group.type || "select",
+        group.name,
+        group.proxies || [],
+        group.url,
+        group.interval,
+        allNodeNames,
+        sourceGroups.map((item) => item.name),
+        nodeNameMap
+      );
+    }
+  }
+  if (block.length <= 1) return;
+  const rulesIndex = lines.findIndex((line) => line.trimEnd() === "rules:");
+  lines.splice(rulesIndex === -1 ? lines.length : rulesIndex, 0, ...block);
+}
+function mapRuleTarget(rule, nodeNameMap) {
+  if (!rule || rule.startsWith("#")) return rule;
+  const parts = rule.split(",");
+  if (parts.length < 2) return rule;
+  let end = parts.length;
+  let suffix = "";
+  if (parts[parts.length - 1].trim().toLowerCase() === "no-resolve") {
+    end -= 1;
+    suffix = ",no-resolve";
+  }
+  if (end < 2) return rule;
+  const targetIndex = end - 1;
+  const target = parts[targetIndex].trim();
+  const mapped = nodeNameMap.get(target);
+  if (!mapped) return rule;
+  const body = parts.slice(0, targetIndex).join(",");
+  return `${body},${mapped}${suffix}`;
+}
+function isTerminalRule(rule) {
+  const type = rule.split(",")[0].trim().toUpperCase();
+  return type === "MATCH" || type === "FINAL";
+}
 var init_clash = __esm({
   "src/generators/clash.ts"() {
     "use strict";
@@ -3345,343 +3457,1145 @@ var init_clash = __esm({
   }
 });
 
-// src/generators/singbox.ts
-function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
-  const config = {
-    log: { level: "info" },
-    dns: convertSingboxDns(sourceConfig)
-  };
-  const inPort = sourceConfig.port || sourceConfig["mixed-port"] || 2080;
-  config.inbounds = [
-    {
-      type: "mixed",
-      tag: "mixed-in",
-      listen: "127.0.0.1",
-      listen_port: inPort
-    }
+// src/utils/rule-collector.ts
+function isTerminalRule2(rule) {
+  const type = rule.split(",")[0].trim().toUpperCase();
+  return type === "MATCH" || type === "FINAL";
+}
+function toRuleArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((rule) => typeof rule === "string" && rule.trim() !== "" && !rule.startsWith("#"));
+}
+function collectFinalRules(sourceConfig, iniConfig, params, ruleContents, options) {
+  const sourceRules = toRuleArray(sourceConfig.rules);
+  if (iniConfig.rulesetEntries.length === 0) {
+    return params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules, { stopAtTerminal: false });
+  }
+  const sourceNonTerminal = iniConfig.overwriteOriginalRules ? [] : sourceRules.filter((rule) => !isTerminalRule2(rule));
+  const rawRules = [
+    ...sourceNonTerminal,
+    ...expandRulesetEntries(iniConfig, ruleContents, options.finalType, options.onMissingContent)
   ];
-  const prepared = prepareNodes(sourceConfig.proxies, params);
-  const allNodes = prepared.nodes;
-  const allNodeNames = prepared.allNames;
-  const nodeNameMap = prepared.displayNames;
-  const outbounds = [];
-  outbounds.push({ type: "direct", tag: "DIRECT" });
-  outbounds.push({ type: "block", tag: "REJECT" });
-  for (const node of allNodes) {
-    const outbound = convertNodeToSingboxOutbound(node, params);
-    if (outbound) {
-      outbounds.push(outbound);
-    }
-  }
-  config.outbounds = outbounds;
-  const rules = [];
-  let skippedRules = 0;
-  if (params.config && iniConfig.rulesetEntries.length > 0) {
-    const expandedGroups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
-    for (const group of expandedGroups) {
-      const members = group.proxies.filter((p) => allNodeNames.includes(p) || nodeNameMap.has(p) || ["DIRECT", "REJECT"].includes(p)).map((p) => mapNodeReference(p, nodeNameMap));
-      if (members.length === 0) continue;
-      const tag = group.name;
-      if (group.groupType === "url-test") {
-        outbounds.push({
-          type: "urltest",
-          tag,
-          outbounds: members,
-          url: group.url || "http://www.gstatic.com/generate_204",
-          interval: group.interval ? `${group.interval}s` : "300s"
-        });
-      } else {
-        outbounds.push({
-          type: "selector",
-          tag,
-          outbounds: members.length > 1 ? members : [...members, "DIRECT"],
-          default: members[0]
-        });
-      }
-    }
-    const rawRules = expandRulesetEntries(iniConfig, ruleContents, "MATCH");
-    const finalRules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
-    for (const rule of finalRules) {
-      const singboxRule = convertRuleToSingboxWithTarget(rule);
-      if (singboxRule) rules.push(singboxRule);
-      else if (rule && !rule.startsWith("#")) skippedRules++;
-    }
-  } else {
-    const sourceRules = (sourceConfig.rules || []).filter(
-      (rule) => typeof rule === "string" && rule !== "" && !rule.startsWith("#")
-    );
-    const finalRules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
-    for (const rule of finalRules) {
-      const singboxRule = convertRuleToSingboxWithTarget(rule, nodeNameMap);
-      if (singboxRule) rules.push(singboxRule);
-      else if (rule && !rule.startsWith("#")) skippedRules++;
-    }
-  }
-  if (skippedRules > 0) {
-    console.warn(`[sing-box] \u5DF2\u8DF3\u8FC7 ${skippedRules} \u6761\u65E0\u6CD5\u8F6C\u6362\u7684\u89C4\u5219\uFF08\u5982 URL-REGEX\u3001IPSET\uFF09`);
-  }
-  if (rules.length > 0) {
-    config.route = { rules, auto_detect_interface: true };
-  }
-  return JSON.stringify(config, null, 2);
+  return params.dedup === false ? rawRules : pruneRulesWithLog(rawRules, { stopAtTerminal: false });
 }
-function convertNodeToSingboxOutbound(node, params) {
-  const singboxType = SINGBOX_TYPE_MAP[node.type];
-  if (!singboxType) {
-    console.warn(`[sing-box] \u4E0D\u652F\u6301\u7684\u8282\u70B9\u7C7B\u578B: ${node.type} (${node.name})\uFF0C\u5DF2\u8DF3\u8FC7`);
-    return null;
+var init_rule_collector = __esm({
+  "src/utils/rule-collector.ts"() {
+    "use strict";
+    init_rule_pruner();
   }
-  const displayName = node.name;
-  const outbound = {
-    type: singboxType,
-    tag: displayName,
-    server: node.server,
-    server_port: node.port
+});
+
+// src/generators/singbox-dns.ts
+function parseDnsServerAddress(raw2) {
+  const value = String(raw2 || "").trim();
+  if (!value) return null;
+  if (value === "local" || value === "system") return { type: "local" };
+  if (value === "fakeip") return { type: "fakeip" };
+  if (value === "dhcp://auto" || value === "dhcp") return { type: "dhcp" };
+  const dhcpInterface = value.match(/^dhcp:\/\/(.+)$/i);
+  if (dhcpInterface) return { type: "dhcp", server: dhcpInterface[1] };
+  const url = value.match(/^(https?|tls|quic|h3|tcp|udp):\/\/(.+)$/i);
+  if (url) {
+    const scheme = url[1].toLowerCase();
+    const rest = url[2];
+    const slash = rest.indexOf("/");
+    const hostPart = slash === -1 ? rest : rest.slice(0, slash);
+    const path = slash === -1 ? void 0 : rest.slice(slash);
+    const { host: host2, port: port2 } = splitHostPort(hostPart);
+    if (scheme === "https" || scheme === "http") {
+      const server2 = { type: "https", server: host2 };
+      if (port2 !== void 0) server2.server_port = port2;
+      server2.path = path && path !== "/" ? path : "/dns-query";
+      return server2;
+    }
+    if (scheme === "h3") {
+      const server2 = { type: "h3", server: host2 };
+      if (port2 !== void 0) server2.server_port = port2;
+      server2.path = path && path !== "/" ? path : "/dns-query";
+      return server2;
+    }
+    const typeMap = { tls: "tls", quic: "quic", tcp: "tcp", udp: "udp" };
+    const server = { type: typeMap[scheme], server: host2 };
+    if (port2 !== void 0) server.server_port = port2;
+    return server;
+  }
+  const { host, port } = splitHostPort(value);
+  if (IPV4_LITERAL.test(host) || IPV6_LITERAL.test(host)) {
+    const server = { type: "udp", server: host };
+    if (port !== void 0) server.server_port = port;
+    return server;
+  }
+  return null;
+}
+function splitHostPort(value) {
+  const trimmed = value.replace(/^\[|\]$/g, "");
+  const bracketed = value.match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (bracketed) {
+    return { host: bracketed[1], port: bracketed[2] ? Number(bracketed[2]) : void 0 };
+  }
+  const parts = trimmed.split(":");
+  if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+    return { host: parts[0], port: Number(parts[1]) };
+  }
+  return { host: trimmed };
+}
+function convertClashDnsToSingbox(clashDns, options = {}) {
+  const warnings = [];
+  const src = clashDns && typeof clashDns === "object" ? clashDns : {};
+  const servers = [];
+  const tags = /* @__PURE__ */ new Set();
+  const bootstrapTags = [];
+  const addServer = (server, tag, bootstrap = false) => {
+    if (!server) return void 0;
+    let finalTag = tag;
+    let suffix = 2;
+    while (tags.has(finalTag)) finalTag = `${tag}-${suffix++}`;
+    tags.add(finalTag);
+    server.tag = finalTag;
+    if (bootstrap) bootstrapTags.push(finalTag);
+    servers.push(server);
+    return finalTag;
   };
-  switch (node.type) {
-    case "ss":
-      outbound.method = node.cipher || "aes-128-gcm";
-      outbound.password = node.password || "";
-      if (node.plugin === "obfs" && node["plugin-opts"]) {
-        const opts = node["plugin-opts"];
-        outbound.plugin = "obfs-local";
-        outbound.plugin_opts = `${opts.mode || "http"};obfs-host=${opts.host || ""}`;
+  addServer({ type: "local" }, "local");
+  const defaultNs = toStringArray2(src["default-nameserver"]);
+  defaultNs.forEach((entry, index) => {
+    addServer(parseDnsServerAddress(entry), `bootstrap-${index + 1}`, true);
+  });
+  let primaryTag;
+  const primaryList = toStringArray2(src.nameserver);
+  primaryList.forEach((entry, index) => {
+    const tag = addServer(parseDnsServerAddress(entry), index === 0 ? "remote" : `remote-${index + 1}`);
+    if (index === 0) primaryTag = tag;
+  });
+  const fallbackList = toStringArray2(src.fallback);
+  fallbackList.forEach((entry, index) => {
+    addServer(parseDnsServerAddress(entry), `fallback-${index + 1}`);
+  });
+  const proxyNs = toStringArray2(src["proxy-server-nameserver"]);
+  const proxyNsTag = addServer(parseDnsServerAddress(proxyNs[0] || ""), "proxy-nameserver", true);
+  const enhancedMode = String(src["enhanced-mode"] || "").toLowerCase();
+  const fakeIpEnabled = enhancedMode === "fake-ip";
+  const fakeIpRange = String(src["fake-ip-range"] || "").trim();
+  const fakeIpFilter = toStringArray2(src["fake-ip-filter"]);
+  const cacheSize = typeof src["cache-size"] === "number" ? src["cache-size"] : void 0;
+  const hasContent = servers.length > 1 || primaryList.length > 0 || fallbackList.length > 0 || fakeIpEnabled || defaultNs.length > 0 || proxyNs.length > 0;
+  if (!hasContent) {
+    if (!options.requireDns) return { dns: null, bootstrapTags, warnings };
+    servers.length = 0;
+    tags.clear();
+    bootstrapTags.length = 0;
+    addServer({ type: "local" }, "local");
+    const bootstrap = addServer(parseDnsServerAddress("223.5.5.5"), "bootstrap-1", true);
+    const remote = addServer(parseDnsServerAddress("https://1.1.1.1/dns-query"), "remote");
+    if (bootstrap && remote) {
+      const target = servers.find((server) => server.tag === remote);
+      if (target) target.domain_resolver = bootstrap;
+    }
+    primaryTag = remote;
+  }
+  const rules = [];
+  rules.push({ domain_suffix: [".local", ".lan", ".home.arpa", ".internal"], server: "local" });
+  if (fakeIpEnabled) {
+    rules.push({ query_type: ["A", "AAAA"], action: "route", server: "fakeip" });
+  }
+  if (fakeIpEnabled && fakeIpFilter.length > 0) {
+    const domain = [];
+    const domainSuffix = [];
+    for (const entry of fakeIpFilter) {
+      const value = entry.trim();
+      if (!value) continue;
+      if (value.startsWith("+.") || value.startsWith("*.")) domainSuffix.push(value.slice(2));
+      else if (value.startsWith(".")) domainSuffix.push(value.slice(1));
+      else domain.push(value);
+    }
+    const filterRule = { query_type: ["A", "AAAA"], action: "route", server: "local" };
+    if (domain.length > 0) filterRule.domain = domain;
+    if (domainSuffix.length > 0) filterRule.domain_suffix = domainSuffix;
+    if (filterRule.domain || filterRule.domain_suffix) rules.push(filterRule);
+  }
+  const policy = src["nameserver-policy"];
+  if (policy && typeof policy === "object") {
+    for (const [key, value] of Object.entries(policy)) {
+      const target = Array.isArray(value) ? String(value[0] || "") : String(value || "");
+      const parsed = parseDnsServerAddress(target);
+      if (!parsed) continue;
+      const tag = addServer(parsed, `policy-${servers.length + 1}`);
+      const list = key.split(",").map((part) => part.trim()).filter(Boolean);
+      const exact = [];
+      const suffix = [];
+      for (const item of list) {
+        if (item.startsWith("+.") || item.startsWith("*.")) suffix.push(item.slice(2));
+        else if (item.startsWith(".")) suffix.push(item.slice(1));
+        else exact.push(item);
       }
-      break;
-    case "trojan":
-      outbound.password = node.password || "";
-      break;
-    case "vmess":
-    case "vless":
-      outbound.uuid = node.uuid || "";
-      break;
-    case "anytls":
-      outbound.password = node.password || "";
-      singboxTls(outbound).enabled = true;
-      break;
+      const rule = { action: "route", server: tag };
+      if (exact.length > 0) rule.domain = exact;
+      if (suffix.length > 0) rule.domain_suffix = suffix;
+      rules.push(rule);
+    }
   }
-  if (params.scv || node["skip-cert-verify"]) {
-    singboxTls(outbound).insecure = true;
+  if (fallbackList.length > 0) {
+    warnings.push("Clash dns.fallback \u5728 sing-box \u4E2D\u6CA1\u6709\u7B49\u4EF7\u7269\uFF0C\u5DF2\u4F5C\u4E3A\u5907\u7528\u670D\u52A1\u7AEF\u52A0\u5165");
   }
-  if (node.sni) {
-    singboxTls(outbound).server_name = node.sni;
+  if (src["fallback-filter"] !== void 0) {
+    warnings.push("Clash dns.fallback-filter \u5728 sing-box \u4E2D\u6CA1\u6709\u7B49\u4EF7\u7269\uFF0C\u5DF2\u5FFD\u7565");
   }
-  if (node.alpn) {
-    const alpn = Array.isArray(node.alpn) ? node.alpn.map((value) => String(value)).filter(Boolean) : String(node.alpn).split(/[,;]/).map((value) => value.trim()).filter(Boolean);
-    if (alpn.length > 0) singboxTls(outbound).alpn = alpn;
+  if (src["use-hosts"] !== void 0) {
+    warnings.push("Clash dns.use-hosts \u5728 sing-box \u4E2D\u6CA1\u6709\u7B49\u4EF7\u7269\uFF0C\u5DF2\u5FFD\u7565");
   }
-  return outbound;
+  if (src["respect-rules"] !== void 0 && !options.proxyDetour) {
+    warnings.push("Clash dns.respect-rules \u9700\u8981\u4EE3\u7406\u51FA\u7AD9\u624D\u80FD\u6620\u5C04\u4E3A detour\uFF0C\u5DF2\u5FFD\u7565");
+  }
+  if (src.enable === false) {
+    warnings.push("Clash dns.enable = false\uFF0C\u5DF2\u7701\u7565 sing-box dns \u6BB5");
+    return { dns: null, bootstrapTags, warnings };
+  }
+  if (fakeIpEnabled) {
+    const fakeipServer = { type: "fakeip", tag: "fakeip" };
+    if (fakeIpRange) fakeipServer.inet4_range = normalizeFakeIpRange(fakeIpRange);
+    servers.push(fakeipServer);
+  }
+  const dns = { servers, rules };
+  if (primaryTag) dns.final = primaryTag;
+  if (cacheSize !== void 0) dns.cache_capacity = cacheSize;
+  const bootstrapForResolvers = bootstrapTags[0] || proxyNsTag;
+  if (bootstrapForResolvers) {
+    for (const server of servers) {
+      if (server.type === "udp" || server.type === "local" || server.type === "dhcp" || server.type === "fakeip") continue;
+      if (server.domain_resolver) continue;
+      server.domain_resolver = bootstrapForResolvers;
+    }
+  }
+  if (src["respect-rules"] === true && options.proxyDetour) {
+    for (const server of servers) {
+      if (server.type === "local" || server.type === "fakeip" || server.type === "dhcp") continue;
+      if (bootstrapTags.includes(server.tag || "")) continue;
+      server.detour = options.proxyDetour;
+    }
+  }
+  return { dns, domainResolverTag: primaryTag || bootstrapTags[0], bootstrapTags, warnings };
 }
-function singboxTls(outbound) {
-  if (!outbound.tls || typeof outbound.tls !== "object") outbound.tls = {};
-  return outbound.tls;
+function toStringArray2(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
 }
-function convertRuleToSingboxWithTarget(rule, nodeNameMap) {
-  const parsedRule = parseClashRule(rule);
-  if (!parsedRule) return null;
-  const outbound = nodeNameMap ? mapNodeReference(parsedRule.target, nodeNameMap) : parsedRule.target;
-  if (parsedRule.type === "MATCH" || parsedRule.type === "FINAL") return { outbound };
-  const converted = convertRuleToSingbox(rule);
-  return converted ? { ...converted, outbound } : null;
+function normalizeFakeIpRange(value) {
+  const match2 = value.trim().match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+  if (!match2) return value.trim();
+  const octets = match2[1].split(".").map((part) => Number(part));
+  const prefix = Number(match2[2]);
+  if (octets.some((octet) => !Number.isFinite(octet) || octet > 255) || prefix > 32) return value.trim();
+  const net = octets.reduce((acc, octet) => acc * 256 + octet, 0) >>> 0;
+  const shift = 32 - prefix;
+  const masked = prefix === 0 ? 0 : net >>> shift << shift >>> 0;
+  const out = [masked >>> 24 & 255, masked >>> 16 & 255, masked >>> 8 & 255, masked & 255];
+  return `${out.join(".")}/${prefix}`;
 }
-function convertRuleToSingbox(rule) {
-  const parsed = parseClashRule(rule);
+var IPV4_LITERAL, IPV6_LITERAL;
+var init_singbox_dns = __esm({
+  "src/generators/singbox-dns.ts"() {
+    "use strict";
+    IPV4_LITERAL = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+    IPV6_LITERAL = /^[0-9a-f:]+$/i;
+  }
+});
+
+// src/generators/singbox-rules.ts
+function parseRuleForSingbox(rule) {
+  const raw2 = rule.trim();
+  if (!raw2 || raw2.startsWith("#")) return null;
+  const parts = raw2.split(",").map((part) => part.trim());
+  if (parts.length < 2) return null;
+  const type = parts[0].toUpperCase();
+  let end = parts.length;
+  let noResolve = false;
+  if (parts[parts.length - 1].toLowerCase() === "no-resolve") {
+    noResolve = true;
+    end -= 1;
+  }
+  if (end < 2) return null;
+  if (type === "MATCH" || type === "FINAL") {
+    return { type, value: "", target: parts[end - 1] || "DIRECT", noResolve };
+  }
+  const hasTarget = end >= 3;
+  const target = hasTarget ? parts[end - 1] : "DIRECT";
+  const valueParts = parts.slice(1, hasTarget ? end - 1 : end);
+  return { type, value: valueParts.join(","), target, noResolve };
+}
+function resolveTarget(target, options, missingGroups) {
+  const mapped = options.nodeNameMap.get(target) || target;
+  if (options.availableTags.has(mapped)) return { tag: mapped, needsGroup: false };
+  for (const [original, display] of options.nodeNameMap) {
+    if (display === target && options.availableTags.has(original)) {
+      return { tag: original, needsGroup: false };
+    }
+  }
+  const upper = mapped.toUpperCase();
+  if (upper === "REJECT" || upper === "REJECT-DROP" || upper === "REJECT-TLS") {
+    return { tag: "REJECT", needsGroup: false };
+  }
+  if (BUILTIN_TARGETS.has(upper)) return { tag: "DIRECT", needsGroup: false };
+  if (mapped && !missingGroups.has(mapped)) missingGroups.add(mapped);
+  return mapped ? { tag: mapped, needsGroup: true } : null;
+}
+function convertRuleToSingbox(rule, options, missingGroups = /* @__PURE__ */ new Set()) {
+  const parsed = parseRuleForSingbox(rule);
   if (!parsed) return null;
-  const ruleType = parsed.type;
-  const value = parsed.value;
-  switch (ruleType) {
-    case "DOMAIN-SUFFIX":
-      return { domain_suffix: value };
+  const target = resolveTarget(parsed.target, options, missingGroups);
+  if (!target) return null;
+  if (parsed.type === "MATCH" || parsed.type === "FINAL") {
+    return { rule: {}, terminalTarget: target.tag, ruleSets: [] };
+  }
+  const value = parsed.value.trim();
+  const negative = value.startsWith("!");
+  const body = negative ? value.slice(1).trim() : value;
+  const ruleSets = [];
+  const build = (matcher) => {
+    const result = { ...matcher };
+    if (negative) result.invert = true;
+    result.action = "route";
+    result.outbound = target.tag;
+    return result;
+  };
+  switch (parsed.type) {
     case "DOMAIN":
-      return { domain: value };
+      return { rule: build({ domain: splitDomainValues(body) }), ruleSets };
+    case "DOMAIN-SUFFIX":
+      return { rule: build({ domain_suffix: splitDomainValues(body) }), ruleSets };
     case "DOMAIN-KEYWORD":
-      return { domain_keyword: value };
+      return { rule: build({ domain_keyword: splitDomainValues(body) }), ruleSets };
     case "DOMAIN-REGEX":
-      return { domain_regex: value };
+      return { rule: build({ domain_regex: splitDomainValues(body) }), ruleSets };
     case "IP-CIDR":
-      return { ip_cidr: value };
     case "IP-CIDR6":
-      return { ip_cidr: value };
-    case "GEOIP":
-      return { geoip: value.toLowerCase() };
+      return { rule: build({ ip_cidr: [body] }), ruleSets };
+    case "SRC-IP-CIDR":
+      return { rule: build({ source_ip_cidr: [body] }), ruleSets };
     case "PROCESS-NAME":
-      return { process_name: value };
+      return { rule: build({ process_name: [body] }), ruleSets };
+    case "PROCESS-PATH":
+      return { rule: build({ process_path: [body] }), ruleSets };
+    case "PROCESS-PATH-REGEX":
+      return { rule: build({ process_path_regex: body }), ruleSets };
+    case "PROCESS-NAME-REGEX":
+      return { rule: build({ process_name: [body] }), ruleSets };
+    case "DST-PORT":
+      return { rule: build({ port: parsePortList(body) }), ruleSets };
+    case "SRC-PORT":
+      return { rule: build({ source_port: parsePortList(body) }), ruleSets };
+    case "NETWORK": {
+      const networkValue = body.toLowerCase();
+      if (networkValue !== "tcp" && networkValue !== "udp") return null;
+      return { rule: build({ network: [networkValue] }), ruleSets };
+    }
+    case "GEOIP": {
+      if (PRIVATE_GEOIP.has(body.toUpperCase())) {
+        return { rule: build({ ip_is_private: true }), ruleSets };
+      }
+      if (options.geoRules === "skip") return null;
+      const code = body.toLowerCase();
+      if (!/^[a-z]{2}$/.test(code)) return null;
+      const tag = `geoip-${code}`;
+      ruleSets.push(tag);
+      return { rule: build({ rule_set: [tag] }), ruleSets };
+    }
+    case "GEOSITE": {
+      if (options.geoRules === "skip") return null;
+      const code = body.toLowerCase();
+      if (!/^[a-z0-9-]+$/.test(code)) return null;
+      const tag = `geosite-${code}`;
+      ruleSets.push(tag);
+      return { rule: build({ rule_set: [tag] }), ruleSets };
+    }
+    case "RULE-SET": {
+      const providerName = body;
+      const mapped = options.ruleProviderTags?.get(providerName);
+      if (!mapped) return null;
+      return { rule: build({ rule_set: [mapped] }), ruleSets: [] };
+    }
     default:
       return null;
   }
 }
-function convertSingboxDns(config) {
-  if (config.dns) return config.dns;
-  return {
-    servers: [
-      { tag: "remote", address: "tls://1.1.1.1/dns-query" },
-      { tag: "remote-backup", address: "tls://dns.google/dns-query" }
-    ],
-    rules: [
-      { outbound: "any", server: "remote" }
-    ]
-  };
+function splitDomainValues(value) {
+  return value.split("/").map((item) => item.trim()).filter(Boolean);
 }
-var SINGBOX_TYPE_MAP;
+function parsePortList(value) {
+  return value.split("/").map((item) => item.trim()).filter(Boolean).map((item) => {
+    if (/^\d+$/.test(item)) return Number(item);
+    return item;
+  });
+}
+function buildRuleSetDefinition(tag) {
+  if (tag.startsWith("geoip-")) {
+    return {
+      type: "remote",
+      tag,
+      format: "binary",
+      url: `${SINGBOX_GEOIP_RULE_SET_BASE}/${tag}.srs`,
+      update_interval: "7d",
+      http_client: RULE_SET_HTTP_CLIENT
+    };
+  }
+  if (tag.startsWith("geosite-")) {
+    return {
+      type: "remote",
+      tag,
+      format: "binary",
+      url: `${SINGBOX_GEOSITE_RULE_SET_BASE}/${tag}.srs`,
+      update_interval: "7d",
+      http_client: RULE_SET_HTTP_CLIENT
+    };
+  }
+  return null;
+}
+function convertRulesToSingbox(rules, options) {
+  const out = [];
+  const dropped = /* @__PURE__ */ new Map();
+  const warnings = [];
+  const usedRuleSets = /* @__PURE__ */ new Set();
+  const missingGroups = /* @__PURE__ */ new Set();
+  let final;
+  for (const rule of rules) {
+    if (!rule || rule.startsWith("#")) continue;
+    const parsed = parseRuleForSingbox(rule);
+    if (!parsed) {
+      const type = rule.split(",")[0].trim().toUpperCase() || "(\u7A7A)";
+      dropped.set(type, (dropped.get(type) ?? 0) + 1);
+      continue;
+    }
+    const converted = convertRuleToSingbox(rule, options, missingGroups);
+    if (!converted) {
+      dropped.set(parsed.type, (dropped.get(parsed.type) ?? 0) + 1);
+      continue;
+    }
+    if (converted.terminalTarget) {
+      final = converted.terminalTarget;
+      break;
+    }
+    for (const tag of converted.ruleSets) usedRuleSets.add(tag);
+    out.push(converted.rule);
+  }
+  if (!final) {
+    final = options.fallbackTag || (options.availableTags.has("DIRECT") ? "DIRECT" : void 0);
+    if (final) warnings.push(`\u89C4\u5219\u4E2D\u7F3A\u5C11 MATCH/FINAL \u515C\u5E95\uFF0C\u5DF2\u8865 route.final = ${final}`);
+  }
+  if (missingGroups.size > 0) {
+    warnings.push(`\u89C4\u5219\u5F15\u7528\u7684\u7B56\u7565\u7EC4\u4E0D\u5B58\u5728\uFF0C\u5DF2\u6309\u5168\u90E8\u8282\u70B9\u5408\u6210: ${[...missingGroups].join("\u3001")}`);
+  }
+  const ruleSets = [];
+  for (const tag of [...usedRuleSets].sort()) {
+    const def = buildRuleSetDefinition(tag);
+    if (def) ruleSets.push(def);
+  }
+  return { rules: out, final, ruleSets, missingGroups: [...missingGroups], dropped, warnings };
+}
+function convertClashRuleProviders(providers) {
+  const ruleSets = [];
+  const tags = /* @__PURE__ */ new Map();
+  const skipped = [];
+  if (!providers || typeof providers !== "object") return { ruleSets, tags, skipped };
+  for (const [name, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== "object") continue;
+    const url = typeof provider.url === "string" ? provider.url : "";
+    if (provider.type === "file" || !url) {
+      skipped.push(name);
+      continue;
+    }
+    const tag = sanitizeRuleSetTag(name);
+    const interval = typeof provider.interval === "number" && provider.interval > 0 ? `${provider.interval}s` : "24h";
+    ruleSets.push({
+      type: "remote",
+      tag,
+      format: provider.format === "text" ? "source" : "binary",
+      url,
+      update_interval: interval,
+      http_client: RULE_SET_HTTP_CLIENT
+    });
+    tags.set(name, tag);
+  }
+  return { ruleSets, tags, skipped };
+}
+function sanitizeRuleSetTag(name) {
+  const cleaned = name.replace(/[^\p{L}\p{N}_-]/gu, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return cleaned || "rule-set";
+}
+var SINGBOX_GEOIP_RULE_SET_BASE, SINGBOX_GEOSITE_RULE_SET_BASE, PRIVATE_GEOIP, BUILTIN_TARGETS, RULE_SET_HTTP_CLIENT;
+var init_singbox_rules = __esm({
+  "src/generators/singbox-rules.ts"() {
+    "use strict";
+    SINGBOX_GEOIP_RULE_SET_BASE = "https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set";
+    SINGBOX_GEOSITE_RULE_SET_BASE = "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set";
+    PRIVATE_GEOIP = /* @__PURE__ */ new Set(["LAN", "PRIVATE"]);
+    BUILTIN_TARGETS = /* @__PURE__ */ new Set(["DIRECT", "REJECT", "REJECT-DROP", "REJECT-TLS"]);
+    RULE_SET_HTTP_CLIENT = "rule-set-download";
+  }
+});
+
+// src/generators/singbox.ts
+function generateSingboxConfig(sourceConfig, iniConfig, params, ruleContents) {
+  const warnings = [];
+  const { nodes: validProxies, dropped: droppedNodes } = filterValidNodes(sourceConfig.proxies || []);
+  const prepared = prepareNodes(validProxies, params);
+  const allNodes = prepared.nodes;
+  const allNodeNames = prepared.allNames;
+  const outbounds = [
+    { type: "direct", tag: "DIRECT" },
+    { type: "block", tag: "REJECT" }
+  ];
+  const skipped = new Map(droppedNodes);
+  const nodeTags = /* @__PURE__ */ new Set();
+  for (const node of allNodes) {
+    const outbound = convertNodeToSingboxOutbound(node);
+    if (!outbound) {
+      skipped.set(node.type, (skipped.get(node.type) ?? 0) + 1);
+      continue;
+    }
+    const tag = String(outbound.tag);
+    if (nodeTags.has(tag)) continue;
+    nodeTags.add(tag);
+    outbounds.push(outbound);
+  }
+  const groupSpecs = planGroups(sourceConfig["proxy-groups"], iniConfig, params, allNodeNames, prepared.displayNames);
+  const groupTags = new Set(groupSpecs.map((spec) => spec.tag));
+  const availableTags = /* @__PURE__ */ new Set([...nodeTags, ...groupTags, "DIRECT", "REJECT"]);
+  const rules = collectRules(sourceConfig, iniConfig, params, ruleContents, warnings);
+  const preselectedFallback = pickFallbackTag(groupSpecs, availableTags);
+  const providerPlan = convertClashRuleProviders(
+    sourceConfig["rule-providers"]
+  );
+  const routeResult = convertRulesToSingbox(rules, {
+    nodeNameMap: prepared.displayNames,
+    availableTags,
+    fallbackTag: preselectedFallback,
+    ruleProviderTags: providerPlan.tags,
+    geoRules: params.geo_rules === "skip" ? "skip" : "remote"
+  });
+  warnings.push(...routeResult.warnings);
+  const emittedGroups = /* @__PURE__ */ new Set();
+  const groupOutbounds = [];
+  const appendGroup = (tag, type, candidates, url, interval, tolerance) => {
+    if (emittedGroups.has(tag)) return;
+    let members = dedupe(candidates).filter((member) => (availableTags.has(member) || member === "DIRECT" || member === "REJECT") && member !== tag);
+    if (members.length === 0) {
+      members = [...allNodeNames].filter((name) => name !== tag && availableTags.has(name));
+      if (members.length === 0) members = ["DIRECT"];
+      warnings.push(`\u7B56\u7565\u7EC4\u300C${tag}\u300D\u7684\u6210\u5458\u5747\u4E0D\u53EF\u7528\uFF0C\u5DF2\u56DE\u9000\u4E3A\u5168\u90E8\u8282\u70B9`);
+    }
+    const outbound = { type, tag };
+    if (type === "urltest") {
+      outbound.outbounds = members;
+      outbound.url = url || "http://www.gstatic.com/generate_204";
+      outbound.interval = `${clampInterval(interval)}s`;
+      outbound.idle_timeout = "30m";
+      if (tolerance && tolerance > 0) outbound.tolerance = tolerance;
+    } else {
+      outbound.outbounds = members.length > 1 ? members : [...members, "DIRECT"];
+      outbound.default = members[0];
+    }
+    emittedGroups.add(tag);
+    groupOutbounds.push(outbound);
+  };
+  for (const spec of groupSpecs) {
+    appendGroup(spec.tag, spec.type, spec.members, spec.url, spec.interval, spec.tolerance);
+  }
+  for (const tag of routeResult.missingGroups) {
+    appendGroup(tag, "selector", allNodeNames.length > 0 ? [...allNodeNames] : ["DIRECT"]);
+  }
+  const emittedGroupTags = new Set(groupOutbounds.map((outbound) => String(outbound.tag)));
+  outbounds.push(...groupOutbounds);
+  const effectiveFallback = groupOutbounds.length > 0 ? emittedGroupTags.has(String(routeResult.final)) ? String(routeResult.final) : String(groupOutbounds[0].tag) : void 0;
+  const dnsResult = convertClashDnsToSingbox(sourceConfig.dns, { proxyDetour: effectiveFallback });
+  warnings.push(...dnsResult.warnings);
+  const config = {
+    log: { level: typeof sourceConfig["log-level"] === "string" ? sourceConfig["log-level"] : "info" }
+  };
+  if (dnsResult.dns) config.dns = dnsResult.dns;
+  config.inbounds = buildInbounds(sourceConfig, params);
+  config.outbounds = outbounds;
+  const route = {};
+  if (routeResult.rules.length > 0) route.rules = routeResult.rules;
+  if (routeResult.final) route.final = routeResult.final;
+  route.auto_detect_interface = true;
+  if (dnsResult.domainResolverTag) {
+    route.default_domain_resolver = { server: dnsResult.domainResolverTag };
+  }
+  const allRuleSets = [...routeResult.ruleSets, ...providerPlan.ruleSets];
+  if (allRuleSets.length > 0) {
+    route.rule_set = allRuleSets;
+    config.http_clients = [{ tag: RULE_SET_HTTP_CLIENT }];
+  }
+  config.route = route;
+  if (params.geo_rules === "skip" && routeResult.dropped.size > 0) {
+    warnings.push("geo_rules=skip\uFF1A\u5DF2\u4E22\u5F03 GEOIP/GEOSITE \u89C4\u5219\uFF0C\u914D\u7F6E\u4E0D\u518D\u9700\u8981\u8FD0\u884C\u65F6\u4E0B\u8F7D\u89C4\u5219\u96C6");
+  }
+  if (providerPlan.skipped.length > 0) {
+    warnings.push(`\u672C\u5730\u6587\u4EF6\u578B rule-provider \u65E0\u6CD5\u5728\u8F6C\u6362\u65F6\u83B7\u53D6\uFF0C\u5DF2\u8DF3\u8FC7: ${providerPlan.skipped.join("\u3001")}`);
+  }
+  if (skipped.size > 0) {
+    const detail = [...skipped.entries()].map(([type, count]) => `${type}\xD7${count}`).join("\u3001");
+    const total = [...skipped.values()].reduce((sum, count) => sum + count, 0);
+    console.warn(`[sing-box] \u5DF2\u8DF3\u8FC7 ${total} \u4E2A\u4E0D\u652F\u6301\u7684\u8282\u70B9: ${detail}`);
+    warnings.push(`\u5DF2\u8DF3\u8FC7 sing-box \u4E0D\u652F\u6301\u7684\u8282\u70B9: ${detail}`);
+  }
+  if (routeResult.dropped.size > 0) {
+    const detail = [...routeResult.dropped.entries()].map(([type, count]) => `${type}\xD7${count}`).join("\u3001");
+    const total = [...routeResult.dropped.values()].reduce((sum, count) => sum + count, 0);
+    console.warn(`[sing-box] \u5DF2\u8DF3\u8FC7 ${total} \u6761\u65E0\u6CD5\u8F6C\u6362\u7684\u89C4\u5219: ${detail}`);
+    warnings.push(`\u5DF2\u8DF3\u8FC7\u65E0\u6CD5\u8F6C\u6362\u7684\u89C4\u5219: ${detail}`);
+  }
+  return JSON.stringify(config, null, 2);
+}
+function planGroups(sourceGroups, iniConfig, params, allNodeNames, nodeNameMap) {
+  const specs = [];
+  const mapMembers = (members) => members.map((member) => mapNodeReference(member, nodeNameMap));
+  if (params.config && iniConfig.customProxyGroups.length > 0) {
+    const expanded = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
+    for (const group of expanded) {
+      specs.push({
+        tag: group.name,
+        type: group.groupType === "url-test" ? "urltest" : "selector",
+        members: dedupe(mapMembers(group.proxies)),
+        url: group.url,
+        interval: group.interval
+      });
+    }
+  } else if (sourceGroups && sourceGroups.length > 0) {
+    for (const group of sourceGroups) {
+      const type = (group.type || "select").toLowerCase();
+      specs.push({
+        tag: group.name,
+        type: type === "url-test" || type === "load-balance" ? "urltest" : "selector",
+        members: dedupe(mapMembers(group.proxies || [])),
+        url: group.url,
+        interval: group.interval,
+        tolerance: group.tolerance
+      });
+    }
+  }
+  if (specs.length === 0 && allNodeNames.length > 0) {
+    specs.push({ tag: "PROXY", type: "selector", members: [...allNodeNames] });
+  }
+  return specs;
+}
+function dedupe(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+function pickFallbackTag(groups, availableTags) {
+  const usable = groups.filter((group) => availableTags.has(group.tag));
+  const selector = usable.find((group) => group.type === "selector");
+  if (selector) return selector.tag;
+  if (usable.length > 0) return usable[0].tag;
+  if (availableTags.has("DIRECT")) return "DIRECT";
+  for (const tag of availableTags) {
+    if (tag !== "REJECT") return tag;
+  }
+  return void 0;
+}
+function collectRules(sourceConfig, iniConfig, params, ruleContents, warnings) {
+  if (iniConfig.rulesetEntries.length === 0 && params.config) {
+    warnings.push("\u5916\u90E8\u914D\u7F6E\u672A\u5305\u542B ruleset \u6761\u76EE\uFF0C\u5DF2\u4EC5\u4F7F\u7528\u8BA2\u9605\u81EA\u5E26\u89C4\u5219");
+  }
+  return collectFinalRules(sourceConfig, iniConfig, params, ruleContents, {
+    finalType: "MATCH",
+    onMissingContent: (entry) => `# \u89C4\u5219\u96C6\u4E0B\u8F7D\u5931\u8D25: ${entry.groupName}`
+  });
+}
+function resolveInboundPort(config) {
+  const mixed = config["mixed-port"];
+  if (typeof mixed === "number" && mixed > 0 && mixed <= 65535) return mixed;
+  const port = config.port;
+  if (typeof port === "number" && port > 0 && port <= 65535) return port;
+  return void 0;
+}
+function resolveInboundListen(config) {
+  if (config["allow-lan"] !== true) return "127.0.0.1";
+  const bind = config["bind-address"];
+  if (typeof bind === "string" && bind && bind !== "*") return bind;
+  return "0.0.0.0";
+}
+function convertNodeToSingboxOutbound(node) {
+  const type = String(node.type || "").toLowerCase();
+  if (UNSUPPORTED_TYPES.has(type)) {
+    console.warn(`[sing-box] \u4E0D\u652F\u6301\u7684\u8282\u70B9\u7C7B\u578B: ${type} (${node.name})\uFF0C\u5DF2\u8DF3\u8FC7`);
+    return null;
+  }
+  const singboxType = SINGBOX_TYPE_MAP[type];
+  if (!singboxType) {
+    console.warn(`[sing-box] \u672A\u6620\u5C04\u7684\u8282\u70B9\u7C7B\u578B: ${type} (${node.name})\uFF0C\u5DF2\u8DF3\u8FC7`);
+    return null;
+  }
+  const outbound = {
+    type: singboxType,
+    tag: node.name,
+    server: node.server,
+    server_port: node.port
+  };
+  switch (type) {
+    case "ss":
+      outbound.method = node.cipher || "aes-128-gcm";
+      outbound.password = node.password || "";
+      applyShadowsocksPlugin(outbound, node);
+      break;
+    case "vmess":
+      outbound.uuid = node.uuid || "";
+      outbound.alter_id = readAlterId(node);
+      if (typeof node.cipher === "string" && node.cipher && node.cipher !== "auto") {
+        outbound.security = node.cipher;
+      }
+      break;
+    case "vless":
+      outbound.uuid = node.uuid || "";
+      if (typeof node.flow === "string" && node.flow) outbound.flow = node.flow;
+      break;
+    case "trojan":
+      outbound.password = node.password || "";
+      break;
+    case "hysteria":
+    case "hysteria2": {
+      outbound.password = node.password || "";
+      applyBandwidth(outbound, node);
+      const obfs = node.obfs;
+      if (type === "hysteria2" && typeof obfs === "string" && obfs === "salamander") {
+        const obfsPassword = node["obfs-password"];
+        if (typeof obfsPassword === "string" && obfsPassword) {
+          outbound.obfs = { type: "salamander", password: obfsPassword };
+        }
+      }
+      break;
+    }
+    case "tuic":
+      if (typeof node.uuid === "string" && node.uuid) outbound.uuid = node.uuid;
+      outbound.password = node.password || "";
+      if (typeof node["congestion-controller"] === "string" && node["congestion-controller"]) {
+        outbound.congestion_control = node["congestion-controller"];
+      }
+      if (typeof node["udp-relay-mode"] === "string" && node["udp-relay-mode"]) {
+        outbound.udp_relay_mode = node["udp-relay-mode"];
+      }
+      break;
+    case "snell":
+      outbound.version = 4;
+      outbound.psk = String(node.psk ?? node.password ?? "");
+      if (node["obfs-opts"] !== void 0) {
+        console.warn(`[sing-box] snell \u8282\u70B9 ${node.name} \u7684 obfs \u5728 sing-box \u4E2D\u65E0\u5BF9\u5E94\u5B57\u6BB5\uFF0C\u5DF2\u5FFD\u7565`);
+      }
+      break;
+    case "http":
+    case "https":
+      if (typeof node.username === "string" && node.username) outbound.username = node.username;
+      if (typeof node.password === "string" && node.password) outbound.password = node.password;
+      break;
+    case "socks5":
+    case "socks":
+      outbound.version = "5";
+      if (typeof node.username === "string" && node.username) outbound.username = node.username;
+      if (typeof node.password === "string" && node.password) outbound.password = node.password;
+      break;
+    case "anytls":
+      outbound.password = node.password || "";
+      break;
+  }
+  applyTransport(outbound, node);
+  applyTls(outbound, node, shouldEnableTls(type, node));
+  if (node.udp === false && outbound.network === void 0) {
+    outbound.network = "tcp";
+  }
+  return outbound;
+}
+function shouldEnableTls(type, node) {
+  switch (type) {
+    case "trojan":
+    case "hysteria":
+    case "hysteria2":
+    case "tuic":
+    case "anytls":
+    case "https":
+      return true;
+    case "vmess":
+    case "vless":
+      return node.tls === true || Boolean(node["reality-opts"]) || Boolean(node.servername) || Boolean(node.sni) || Boolean(node.alpn);
+    case "http":
+      return node.tls === true;
+    default:
+      return false;
+  }
+}
+function applyTls(outbound, node, enable) {
+  const realityOpts = asRecord(node["reality-opts"]);
+  const hasReality = Object.keys(realityOpts).length > 0;
+  const sni = typeof node.servername === "string" && node.servername ? node.servername : typeof node.sni === "string" && node.sni ? node.sni : void 0;
+  const needsTls = enable || hasReality || Boolean(sni) || Boolean(node.alpn) || node["skip-cert-verify"] === true;
+  if (!needsTls) return;
+  const tls = { enabled: true };
+  if (sni) tls.server_name = sni;
+  if (node["skip-cert-verify"] === true) tls.insecure = true;
+  const alpn = normalizeAlpn(node.alpn);
+  if (alpn.length > 0) tls.alpn = alpn;
+  const fingerprint = typeof node["client-fingerprint"] === "string" && node["client-fingerprint"] ? node["client-fingerprint"] : void 0;
+  if (hasReality) {
+    tls.utls = { enabled: true, fingerprint: fingerprint || "chrome" };
+  } else if (fingerprint) {
+    tls.utls = { enabled: true, fingerprint };
+  }
+  if (hasReality) {
+    const publicKey = typeof realityOpts["public-key"] === "string" ? realityOpts["public-key"] : "";
+    if (publicKey) {
+      const reality = { enabled: true, public_key: publicKey };
+      if (typeof realityOpts["short-id"] === "string" && realityOpts["short-id"]) {
+        reality.short_id = realityOpts["short-id"];
+      }
+      tls.reality = reality;
+    }
+  }
+  outbound.tls = tls;
+}
+function normalizeAlpn(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string") return value.split(/[,;]/).map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+function applyTransport(outbound, node) {
+  const network = typeof node.network === "string" ? node.network.toLowerCase() : "";
+  if (!network || network === "tcp") return;
+  if (network === "ws") {
+    const opts = asRecord(node["ws-opts"]);
+    const transport = { type: "ws" };
+    if (typeof opts.path === "string" && opts.path) transport.path = opts.path;
+    const headers = normalizeHeaders(opts.headers);
+    if (Object.keys(headers).length > 0) transport.headers = headers;
+    if (typeof opts["max-early-data"] === "number") transport.max_early_data = opts["max-early-data"];
+    if (typeof opts["early-data-header-name"] === "string" && opts["early-data-header-name"]) {
+      transport.early_data_header_name = opts["early-data-header-name"];
+    }
+    outbound.transport = transport;
+    return;
+  }
+  if (network === "grpc") {
+    const opts = asRecord(node["grpc-opts"]);
+    const transport = { type: "grpc" };
+    if (typeof opts["grpc-service-name"] === "string" && opts["grpc-service-name"]) {
+      transport.service_name = opts["grpc-service-name"];
+    }
+    outbound.transport = transport;
+    return;
+  }
+  if (network === "h2" || network === "http") {
+    const opts = asRecord(node["h2-opts"] ?? node["http-opts"]);
+    const transport = { type: "http" };
+    const host = normalizeStringList(opts.host);
+    if (host.length > 0) transport.host = host;
+    const path = normalizeStringList(opts.path);
+    if (path.length > 0) transport.path = path[0];
+    const headers = normalizeHeaders(opts.headers);
+    if (Object.keys(headers).length > 0) transport.headers = headers;
+    outbound.transport = transport;
+    return;
+  }
+  if (network === "httpupgrade") {
+    const opts = asRecord(node["httpupgrade-opts"] ?? node["ws-opts"]);
+    const transport = { type: "httpupgrade" };
+    if (typeof opts.host === "string" && opts.host) transport.host = opts.host;
+    const upgradePath = normalizeStringList(opts.path);
+    if (upgradePath.length > 0) transport.path = upgradePath[0];
+    outbound.transport = transport;
+  }
+}
+function applyShadowsocksPlugin(outbound, node) {
+  const plugin = typeof node.plugin === "string" ? node.plugin.toLowerCase() : "";
+  const opts = asRecord(node["plugin-opts"]);
+  if (plugin === "obfs") {
+    const mode = typeof opts.mode === "string" && opts.mode ? opts.mode : "http";
+    const host = typeof opts.host === "string" ? opts.host : "";
+    outbound.plugin = "obfs-local";
+    outbound.plugin_opts = `obfs=${mode};obfs-host=${host}`;
+    return;
+  }
+  if (plugin === "v2ray-plugin") {
+    const parts = [];
+    parts.push(`mode=${typeof opts.mode === "string" && opts.mode ? opts.mode : "websocket"}`);
+    if (typeof opts.host === "string" && opts.host) parts.push(`host=${opts.host}`);
+    if (typeof opts.path === "string" && opts.path) parts.push(`path=${opts.path}`);
+    if (opts.tls === true) parts.push("tls");
+    outbound.plugin = "v2ray-plugin";
+    outbound.plugin_opts = parts.join(";");
+  }
+}
+function applyBandwidth(outbound, node) {
+  const up = parseBandwidth(node.up);
+  const down = parseBandwidth(node.down);
+  if (up !== void 0) outbound.up_mbps = up;
+  if (down !== void 0) outbound.down_mbps = down;
+}
+function parseBandwidth(value) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.round(value);
+  if (typeof value !== "string") return void 0;
+  const match2 = value.trim().match(/^([\d.]+)\s*([a-zA-Z/]*)$/);
+  if (!match2) return void 0;
+  const amount = Number(match2[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return void 0;
+  const unit = match2[2].toLowerCase();
+  if (unit.startsWith("k")) return Math.max(1, Math.round(amount / 1024));
+  if (unit.startsWith("g")) return Math.round(amount * 1024);
+  return Math.round(amount);
+}
+function readAlterId(node) {
+  const value = node.alterId ?? node.alterid ?? node["alter-id"];
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+}
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function normalizeHeaders(value) {
+  const out = {};
+  const record = asRecord(value);
+  for (const [key, headerValue] of Object.entries(record)) {
+    if (Array.isArray(headerValue)) {
+      if (headerValue.length > 0) out[key] = String(headerValue[0]);
+    } else if (headerValue !== void 0 && headerValue !== null) {
+      out[key] = String(headerValue);
+    }
+  }
+  return out;
+}
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string" && value) return [value];
+  return [];
+}
+function clampInterval(value) {
+  if (!value || !Number.isFinite(value) || value <= 0) return 180;
+  return Math.min(Math.round(value), 180);
+}
+function resolveTunInterfaceName(sourceConfig) {
+  const tun = sourceConfig.tun;
+  if (tun && typeof tun === "object" && !Array.isArray(tun)) {
+    const name = tun.device;
+    if (typeof name === "string" && name.trim() && name !== "utun") return name.trim();
+  }
+  return void 0;
+}
+function buildInbounds(sourceConfig, params) {
+  const inbounds = [];
+  if (params.tun !== false) {
+    const tun = {
+      type: "tun",
+      tag: "tun-in",
+      address: [TUN_DEFAULT_ADDRESS],
+      stack: "mixed",
+      // 手机端需要它接管系统流量；Apple 平台由 NetworkExtension 接管，该字段被忽略
+      auto_route: true
+    };
+    if (typeof params.tun_mtu === "number" && params.tun_mtu > 0) {
+      tun.mtu = Math.floor(params.tun_mtu);
+    }
+    const interfaceName = resolveTunInterfaceName(sourceConfig);
+    if (interfaceName) tun.interface_name = interfaceName;
+    inbounds.push(tun);
+  }
+  const port = resolveInboundPort(sourceConfig);
+  if (port !== void 0) {
+    inbounds.push({
+      type: "mixed",
+      tag: "mixed-in",
+      listen: resolveInboundListen(sourceConfig),
+      listen_port: port
+    });
+  }
+  if (inbounds.length === 0) {
+    inbounds.push({
+      type: "mixed",
+      tag: "mixed-in",
+      listen: "127.0.0.1",
+      listen_port: DEFAULT_MIXED_PORT
+    });
+  }
+  return inbounds;
+}
+var SINGBOX_TYPE_MAP, UNSUPPORTED_TYPES, DEFAULT_MIXED_PORT, TUN_DEFAULT_ADDRESS;
 var init_singbox = __esm({
   "src/generators/singbox.ts"() {
     "use strict";
     init_ini_parser();
     init_node_utils();
-    init_rule_pruner();
+    init_rule_collector();
+    init_singbox_dns();
+    init_singbox_rules();
     SINGBOX_TYPE_MAP = {
       ss: "shadowsocks",
-      ssr: "shadowsocksr",
       vmess: "vmess",
       vless: "vless",
       trojan: "trojan",
+      hysteria: "hysteria",
       hysteria2: "hysteria2",
-      http: "http",
-      socks5: "socks",
-      snell: "snell",
       tuic: "tuic",
+      snell: "snell",
+      http: "http",
+      https: "http",
+      socks5: "socks",
+      socks: "socks",
       anytls: "anytls"
     };
+    UNSUPPORTED_TYPES = /* @__PURE__ */ new Set(["ssr", "mieru", "wireguard", "juicity", "ssh", "naive"]);
+    DEFAULT_MIXED_PORT = 2080;
+    TUN_DEFAULT_ADDRESS = "172.19.0.1/30";
   }
 });
 
 // src/generators/surge.ts
 function generateSurgeConfig(sourceConfig, iniConfig, params, ruleContents) {
+  const { nodes: validProxies, dropped: droppedNodes } = filterValidNodes(sourceConfig.proxies || []);
+  const prepared = prepareNodes(validProxies, params);
+  const allNodes = prepared.nodes;
+  const allNodeNames = prepared.allNames;
   const lines = [];
   lines.push("# ====================================");
   lines.push("# Prism - \u8BA2\u9605\u8F6C\u6362\u5DE5\u5177 (Surge)");
   lines.push("# ====================================");
   lines.push("");
-  lines.push("[General]");
-  if (sourceConfig["log-level"]) {
-    lines.push(`loglevel = ${sourceConfig["log-level"]}`);
+  const general = [];
+  const logLevel = normalizeLogLevel(sourceConfig["log-level"]);
+  if (logLevel) general.push(`loglevel = ${logLevel}`);
+  const externalController = sourceConfig["external-controller"];
+  if (typeof externalController === "string" && /^\d+\.\d+\.\d+\.\d+:\d+$/.test(externalController)) {
+    general.push(`http-api = ${externalController.replace(":", "@")}`);
   }
-  if (sourceConfig["external-controller"]) {
-    lines.push(`external-controller-access = ${sourceConfig["external-controller"]}`);
+  if (general.length > 0) {
+    lines.push("[General]");
+    lines.push(...general);
+    lines.push("");
   }
-  lines.push("");
-  lines.push("[Proxy]");
-  const prepared = prepareNodes(sourceConfig.proxies, params);
-  const allNodes = prepared.nodes;
-  const nodeNameMap = prepared.displayNames;
-  let skippedNodes = 0;
+  const skipped = new Map(droppedNodes);
+  const proxyLines = [];
+  const emittedNames = [];
+  const emitted = /* @__PURE__ */ new Set();
+  const surgeNames = /* @__PURE__ */ new Map();
   for (const node of allNodes) {
-    const surgeProxy = convertNodeToSurgeProxy(node, params);
-    if (surgeProxy) {
-      lines.push(surgeProxy);
-    } else {
-      skippedNodes++;
-    }
+    const sanitized = escapeSurgeName(node.name);
+    let unique = sanitized;
+    let suffix = 2;
+    while ([...surgeNames.values()].includes(unique)) unique = `${sanitized}-${suffix++}`;
+    surgeNames.set(node.name, unique);
   }
-  if (skippedNodes > 0) {
-    lines.push(`# \u5DF2\u8DF3\u8FC7 ${skippedNodes} \u4E2A Surge \u4E0D\u652F\u6301\u7684\u8282\u70B9`);
+  const surgeNameOf = (name) => surgeNames.get(name) ?? escapeSurgeName(name);
+  for (const node of allNodes) {
+    const line = convertNodeToSurgeProxy(node, params, surgeNameOf(node.name));
+    if (!line) {
+      skipped.set(node.type, (skipped.get(node.type) ?? 0) + 1);
+      continue;
+    }
+    if (emitted.has(node.name)) continue;
+    emitted.add(node.name);
+    emittedNames.push(node.name);
+    proxyLines.push(line);
+  }
+  lines.push("[Proxy]");
+  lines.push(...proxyLines);
+  if (skipped.size > 0) {
+    const detail = [...skipped.entries()].map(([type, count]) => `${type}\xD7${count}`).join("\u3001");
+    lines.push(`# \u5DF2\u8DF3\u8FC7 ${[...skipped.values()].reduce((sum, count) => sum + count, 0)} \u4E2A Surge \u4E0D\u652F\u6301\u7684\u8282\u70B9\uFF08${detail}\uFF09`);
   }
   lines.push("");
-  const allNodeNames = prepared.allNames;
-  if (params.config && iniConfig.customProxyGroups.length > 0) {
-    const groups = expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames);
-    lines.push("[Proxy Group]");
-    for (const group of groups) {
-      const groupType = mapSurgeGroupType(group.groupType);
-      const validProxies = group.proxies.filter((p) => p === "DIRECT" || p === "REJECT" || p === "REJECT-TLS" || allNodeNames.includes(p) || nodeNameMap.has(p) || groups.some((g) => g.name === p)).map((p) => mapNodeReference(p, nodeNameMap));
-      const proxyStr = validProxies.join(", ");
-      if ((group.groupType === "url-test" || group.groupType === "fallback") && group.url) {
-        lines.push(`${group.name} = ${groupType}, ${proxyStr}, url = ${group.url}, interval = ${group.interval || 300}`);
-      } else {
-        lines.push(`${group.name} = ${groupType}, ${proxyStr}`);
+  const groupPlans = planGroups2(sourceConfig["proxy-groups"], iniConfig, params, allNodeNames);
+  const groupNames = new Set(groupPlans.map((plan) => plan.name));
+  const knownPolicies = /* @__PURE__ */ new Set([
+    ...emittedNames.map(surgeNameOf),
+    ...groupPlans.map((plan) => surgeNameOf(plan.name)),
+    ...BUILTIN_POLICIES
+  ]);
+  for (const rawTarget of collectRuleTargets2(sourceConfig, iniConfig, params, ruleContents, prepared.displayNames)) {
+    const target = surgeNameOf(rawTarget);
+    if (knownPolicies.has(target)) continue;
+    const members = emittedNames.map(surgeNameOf).filter((name) => name !== target);
+    groupPlans.push({ name: target, type: "select", members: members.length > 0 ? members : ["DIRECT"] });
+    groupNames.add(target);
+    knownPolicies.add(target);
+  }
+  const groupLines = [];
+  for (const plan of groupPlans) {
+    const members = plan.members.map((member) => mapNodeReference(member, prepared.displayNames)).filter((member) => emitted.has(member) || BUILTIN_POLICIES.has(member) || groupNames.has(member));
+    let unique = [...new Set(members)].filter((member) => member !== plan.name);
+    if (unique.length === 0) {
+      unique = emittedNames.filter((name) => name !== plan.name);
+      if (unique.length === 0) unique = ["DIRECT"];
+    }
+    const parts = [`${surgeNameOf(plan.name)} = ${plan.type}`, ...unique.map(surgeNameOf)];
+    if (plan.type === "url-test" || plan.type === "fallback") {
+      parts.push(`url = ${plan.url || "http://www.gstatic.com/generate_204"}`);
+      parts.push(`interval = ${plan.interval && plan.interval > 0 ? plan.interval : 300}`);
+      if (plan.type === "url-test" && plan.tolerance && plan.tolerance > 0) {
+        parts.push(`tolerance = ${plan.tolerance}`);
       }
     }
-    lines.push("");
-  } else if (sourceConfig["proxy-groups"] && sourceConfig["proxy-groups"].length > 0) {
+    groupLines.push(parts.join(", "));
+  }
+  if (groupLines.length > 0) {
     lines.push("[Proxy Group]");
-    for (const group of sourceConfig["proxy-groups"]) {
-      const groupType = mapSurgeGroupType(group.type || "select");
-      const proxies = (group.proxies || []).map((proxy) => mapNodeReference(proxy, nodeNameMap)).join(", ");
-      if (!proxies) continue;
-      lines.push(`${group.name} = ${groupType}, ${proxies}`);
-    }
+    lines.push(...groupLines);
     lines.push("");
   }
-  if (params.config && iniConfig.rulesetEntries.length > 0) {
-    const rawRules = expandRulesetEntries(iniConfig, ruleContents, "FINAL");
-    const rules = params.dedup === false ? rawRules : pruneRulesWithLog(rawRules);
+  const ruleLines = buildRules(
+    sourceConfig,
+    iniConfig,
+    params,
+    ruleContents,
+    emitted,
+    groupNames,
+    prepared.displayNames,
+    surgeNameOf
+  );
+  if (ruleLines.length > 0) {
     lines.push("[Rule]");
-    for (const rule of rules) {
-      const line = convertRuleToSurgeLine(rule);
-      if (line) lines.push(line);
-    }
-    lines.push("");
-  } else if (sourceConfig.rules && sourceConfig.rules.length > 0) {
-    const sourceRules = sourceConfig.rules.filter(
-      (rule) => typeof rule === "string" && rule !== "" && !rule.startsWith("#")
-    );
-    const rules = params.dedup === false ? sourceRules : pruneRulesWithLog(sourceRules);
-    lines.push("[Rule]");
-    for (const rule of rules) {
-      const line = convertRuleToSurgeLine(rule, nodeNameMap);
-      if (line) lines.push(line);
-    }
+    lines.push(...ruleLines);
     lines.push("");
   }
-  lines.push("[URL Rewrite]");
-  lines.push("# \u65E0\u7279\u5B9A\u7684 URL Rewrite \u89C4\u5219");
-  lines.push("");
-  lines.push("[MITM]");
-  lines.push("# \u672A\u542F\u7528 MITM");
-  lines.push("");
   return lines.join("\n");
 }
-function convertNodeToSurgeProxy(node, params) {
-  const safeName = node.name.replace(/[,=]/g, "\\$&");
-  switch (node.type) {
-    case "ss": {
-      const obfs = node.plugin === "obfs" && node["plugin-opts"] ? `, obfs=${node["plugin-opts"].mode || "http"}, obfs-host=${node["plugin-opts"].host || ""}` : "";
-      let extra = "";
-      if (params.tfo) extra += ", tfo=true";
-      if (params.udp || node.udp) extra += ", udp-relay=true";
-      return `${safeName} = ss, ${node.server}, ${node.port}, encrypt-method=${node.cipher || "aes-128-gcm"}, password=${node.password || ""}${obfs}${extra}`;
+function planGroups2(sourceGroups, iniConfig, params, allNodeNames) {
+  const plans = [];
+  if (params.config && iniConfig.customProxyGroups.length > 0) {
+    for (const group of expandPlaceholderProxies(iniConfig.customProxyGroups, allNodeNames)) {
+      plans.push({
+        name: group.name,
+        type: mapGroupType(group.groupType),
+        members: group.proxies,
+        url: group.url,
+        interval: group.interval
+      });
     }
-    case "trojan": {
-      let extra = "";
-      if (node.sni) extra += `, sni=${node.sni}`;
-      if (params.scv || node["skip-cert-verify"]) extra += ", skip-cert-verify=true";
-      if (params.tfo) extra += ", tfo=true";
-      if (params.udp || node.udp) extra += ", udp-relay=true";
-      return `${safeName} = trojan, ${node.server}, ${node.port}, password=${node.password || ""}${extra}`;
-    }
-    case "vmess": {
-      let extra = "";
-      if (node.network === "ws") {
-        extra += ", ws=true";
-        if (node["ws-opts"]?.path) extra += `, ws-path=${node["ws-opts"].path}`;
-        if (node["ws-opts"]?.headers && node["ws-opts"].headers["Host"]) extra += `, sni=${node["ws-opts"].headers["Host"]}`;
-      } else if (node.network === "grpc") {
-        extra += ", tls=true";
-      } else if (node.network === "h2") {
-        extra += ", tls=true";
-      }
-      if (node.tls && node.network !== "ws") extra += ", tls=true";
-      if (params.tfo) extra += ", tfo=true";
-      if (params.udp || node.udp) extra += ", udp-relay=true";
-      return `${safeName} = vmess, ${node.server}, ${node.port}, username=${node.uuid || ""}${extra}`;
-    }
-    case "vless": {
-      let extra = "";
-      if (params.tfo) extra += ", tfo=true";
-      if (params.udp || node.udp) extra += ", udp-relay=true";
-      return `${safeName} = vless, ${node.server}, ${node.port}, username=${node.uuid || ""}${extra}`;
-    }
-    case "http":
-      return `${safeName} = http, ${node.server}, ${node.port}${node.username ? `, username=${node.username}` : ""}${node.password ? `, password=${node.password}` : ""}`;
-    case "socks5":
-      return `${safeName} = socks5, ${node.server}, ${node.port}${node.username ? `, username=${node.username}` : ""}${node.password ? `, password=${node.password}` : ""}`;
-    default:
-      console.warn(`[Surge] \u4E0D\u652F\u6301\u7684\u8282\u70B9\u7C7B\u578B: ${node.type} (${node.name})\uFF0C\u5DF2\u8DF3\u8FC7`);
-      return null;
+    return plans;
   }
+  if (sourceGroups && sourceGroups.length > 0) {
+    for (const group of sourceGroups) {
+      plans.push({
+        name: group.name,
+        type: mapGroupType(group.type || "select"),
+        members: group.proxies || [],
+        url: group.url,
+        interval: group.interval,
+        tolerance: group.tolerance
+      });
+    }
+    return plans;
+  }
+  plans.push({
+    name: "PROXY",
+    type: "select",
+    members: allNodeNames.length > 0 ? [...allNodeNames] : ["DIRECT"]
+  });
+  return plans;
 }
-function mapSurgeGroupType(groupType) {
-  switch (groupType) {
+function mapGroupType(type) {
+  switch (String(type || "").toLowerCase()) {
     case "url-test":
       return "url-test";
     case "fallback":
@@ -3692,50 +4606,359 @@ function mapSurgeGroupType(groupType) {
       return "select";
   }
 }
-function convertRuleToSurgeLine(rule, nodeNameMap) {
-  const parsedRule = parseClashRule(rule);
-  if (!parsedRule) return null;
-  const target = nodeNameMap ? mapNodeReference(parsedRule.target, nodeNameMap) : parsedRule.target;
-  if (parsedRule.type === "MATCH" || parsedRule.type === "FINAL") return `FINAL,${target}`;
-  const converted = convertRuleToSurge(rule);
-  if (!converted) return null;
-  const keepNoResolve = parsedRule.noResolve && (parsedRule.type === "IP-CIDR" || parsedRule.type === "IP-CIDR6");
-  return keepNoResolve ? `${converted},${target},no-resolve` : `${converted},${target}`;
+function buildRules(sourceConfig, iniConfig, params, ruleContents, emitted, groupNames, nodeNameMap, surgeNameOf) {
+  const rules = collectFinalRules(sourceConfig, iniConfig, params, ruleContents, {
+    finalType: "FINAL",
+    onMissingContent: (entry) => `# \u89C4\u5219\u96C6\u4E0B\u8F7D\u5931\u8D25: ${entry.groupName}`
+  });
+  const lines = [];
+  let fallbackTarget;
+  for (const rule of rules) {
+    if (!rule || rule.startsWith("#")) continue;
+    const parsed = parseSurgeRule(rule);
+    if (!parsed) continue;
+    const target = resolveSurgeTarget(parsed.target, emitted, groupNames, nodeNameMap);
+    if (!target) continue;
+    if (parsed.type === "MATCH" || parsed.type === "FINAL") {
+      fallbackTarget = target;
+      break;
+    }
+    const converted = convertRuleToSurge(parsed);
+    if (!converted) continue;
+    const type = parsed.type;
+    const safeValue = sanitizeSurgeValue(parsed.value);
+    const body = type === "URL-REGEX" || type === "PROCESS-NAME" ? `${type},${safeValue}` : converted;
+    lines.push(`${body},${surgeNameOf(target)}${parsed.noResolve ? ",no-resolve" : ""}`);
+  }
+  if (!fallbackTarget) {
+    fallbackTarget = pickSurgeFallback(groupNames, emitted);
+  }
+  if (fallbackTarget) lines.push(`FINAL,${surgeNameOf(fallbackTarget)}`);
+  return lines;
 }
-function convertRuleToSurge(rule) {
-  const parsed = parseClashRule(rule);
-  if (!parsed) return null;
-  const ruleType = parsed.type;
-  const value = parsed.value;
-  switch (ruleType) {
-    case "DOMAIN-SUFFIX":
-      return `DOMAIN-SUFFIX,${value}`;
+function parseSurgeRule(rule) {
+  const parts = rule.split(",").map((part) => part.trim());
+  if (parts.length < 2) return null;
+  const type = parts[0].toUpperCase();
+  let end = parts.length;
+  let noResolve = false;
+  if (parts[parts.length - 1].toLowerCase() === "no-resolve") {
+    noResolve = true;
+    end -= 1;
+  }
+  if (end < 2) return null;
+  if (type === "MATCH" || type === "FINAL") {
+    return { type, value: "", target: parts[end - 1] || "DIRECT", noResolve };
+  }
+  const hasTarget = end >= 3;
+  return {
+    type,
+    value: parts.slice(1, hasTarget ? end - 1 : end).join(","),
+    target: hasTarget ? parts[end - 1] : "DIRECT",
+    noResolve
+  };
+}
+function resolveSurgeTarget(target, emitted, groupNames, nodeNameMap) {
+  const mapped = nodeNameMap.get(target) || target;
+  if (emitted.has(mapped) || groupNames.has(mapped)) return mapped;
+  const upper = mapped.toUpperCase();
+  if (upper === "REJECT" || upper === "REJECT-TLS" || upper === "REJECT-DROP" || upper === "REJECT-NO-DROP") {
+    return upper;
+  }
+  if (upper === "DIRECT" || upper === "PASS" || upper === "COMPATIBLE") return "DIRECT";
+  return null;
+}
+function pickSurgeFallback(groupNames, emitted) {
+  for (const name of groupNames) return name;
+  for (const name of emitted) return name;
+  return "DIRECT";
+}
+function convertRuleToSurge(parsed) {
+  const { type, value } = parsed;
+  switch (type) {
     case "DOMAIN":
-      return `DOMAIN,${value}`;
+    case "DOMAIN-SUFFIX":
     case "DOMAIN-KEYWORD":
-      return `DOMAIN-KEYWORD,${value}`;
+    case "DOMAIN-WILDCARD":
     case "IP-CIDR":
-      return `IP-CIDR,${value}`;
     case "IP-CIDR6":
-      return `IP-CIDR6,${value}`;
+    case "IP-ASN":
     case "GEOIP":
-      return `GEOIP,${value}`;
-    case "PROCESS-NAME":
-      return `PROCESS-NAME,${value}`;
+    case "SRC-IP":
+    case "SRC-PORT":
+    case "DST-PORT":
+    case "PROTOCOL":
     case "USER-AGENT":
-      return `USER-AGENT,${value}`;
     case "URL-REGEX":
-      return `URL-REGEX,${value}`;
+    case "PROCESS-NAME":
+    case "SUBNET":
+      return `${type},${value}`;
     default:
       return null;
   }
 }
+function convertNodeToSurgeProxy(node, params, displayName) {
+  const type = String(node.type || "").toLowerCase();
+  const surgeType = SURGE_TYPE_MAP[type];
+  if (!surgeType) {
+    console.warn(`[Surge] \u4E0D\u652F\u6301\u7684\u8282\u70B9\u7C7B\u578B: ${type} (${node.name})\uFF0C\u5DF2\u8DF3\u8FC7`);
+    return null;
+  }
+  const name = displayName ?? escapeSurgeName(node.name);
+  const head = `${name} = ${surgeType}, ${node.server}, ${node.port}`;
+  const extras = [];
+  const udpRelay = supportsUdpRelay(type) && (params.udp === true || node.udp === true);
+  if (udpRelay) extras.push("udp-relay=true");
+  if (params.tfo === true || node.tfo === true) extras.push("tfo=true");
+  switch (type) {
+    case "ss": {
+      const parts = [`encrypt-method=${node.cipher || "aes-128-gcm"}`, `password=${node.password || ""}`];
+      const obfs = ssObfs(node);
+      if (obfs) parts.push(...obfs);
+      return joinProxy(head, parts, extras);
+    }
+    case "snell": {
+      const version = resolveSnellVersion(node.version);
+      const parts = [`psk=${node.psk ?? node.password ?? ""}`, `version=${version}`];
+      const obfsOpts = asRecord2(node["obfs-opts"]);
+      const mode = String(obfsOpts.mode || "").toLowerCase();
+      const allowed = version <= 3 ? ["http", "tls"] : version <= 5 ? ["http"] : [];
+      if (allowed.includes(mode)) {
+        parts.push(`obfs=${mode}`);
+        if (typeof obfsOpts.host === "string" && obfsOpts.host) parts.push(`obfs-host=${obfsOpts.host}`);
+        if (typeof obfsOpts.uri === "string" && obfsOpts.uri) parts.push(`obfs-uri=${obfsOpts.uri}`);
+      }
+      return joinProxy(head, parts, extras);
+    }
+    case "vmess": {
+      const parts = [`username=${node.uuid || ""}`];
+      const cipher = typeof node.cipher === "string" ? node.cipher.toLowerCase() : "";
+      if (cipher === "aes-128-gcm" || cipher === "chacha20-ietf-poly1305") {
+        parts.push(`encrypt-method=${cipher}`);
+      }
+      parts.push(`vmess-aead=${readAlterId2(node) === 0 ? "true" : "false"}`);
+      appendWsParams(parts, node);
+      appendTlsParams(parts, node, params);
+      return joinProxy(head, parts, extras);
+    }
+    case "trojan": {
+      const parts = [`password=${node.password || ""}`];
+      appendWsParams(parts, node);
+      appendTlsParams(parts, node, params);
+      return joinProxy(head, parts, extras);
+    }
+    case "tuic": {
+      const parts = [`uuid=${node.uuid || ""}`, `password=${node.password || ""}`];
+      appendTlsParams(parts, node, params, { includeSni: true });
+      return joinProxy(head.replace("= tuic,", "= tuic-v5,"), parts, extras);
+    }
+    case "hysteria2": {
+      const parts = [`password=${node.password || ""}`];
+      const download = parseBandwidthMbps(node.down);
+      if (download !== void 0) parts.push(`download-bandwidth=${download}`);
+      const obfsPassword = node["obfs-password"];
+      if (String(node.obfs || "").toLowerCase() === "salamander" && typeof obfsPassword === "string" && obfsPassword) {
+        parts.push(`salamander-password=${obfsPassword}`);
+      }
+      appendTlsParams(parts, node, params, { includeSni: true });
+      return joinProxy(head, parts, extras);
+    }
+    case "anytls": {
+      const parts = [`password=${node.password || ""}`];
+      appendTlsParams(parts, node, params, { includeSni: true });
+      return joinProxy(head, parts, extras.filter((item) => item !== "udp-relay=true"));
+    }
+    case "ssh": {
+      const parts = [];
+      if (typeof node.username === "string" && node.username) parts.push(`username=${node.username}`);
+      if (typeof node.password === "string" && node.password) parts.push(`password=${node.password}`);
+      return joinProxy(head, parts, extras.filter((item) => item !== "udp-relay=true"));
+    }
+    case "http":
+    case "https":
+    case "socks5": {
+      const positional = [];
+      if (typeof node.username === "string" && node.username) {
+        positional.push(POSITIONAL_PREFIX + node.username);
+        positional.push(POSITIONAL_PREFIX + (typeof node.password === "string" ? node.password : ""));
+      }
+      const parts = [];
+      appendTlsParams(parts, node, params, { includeSni: type === "socks5" });
+      return joinProxy(head, [...positional, ...parts], extras);
+    }
+  }
+  return null;
+}
+function supportsUdpRelay(type) {
+  return type !== "anytls" && type !== "ssh";
+}
+function ssObfs(node) {
+  const plugin = typeof node.plugin === "string" ? node.plugin.toLowerCase() : "";
+  if (plugin !== "obfs" && plugin !== "simple-obfs") return [];
+  const opts = asRecord2(node["plugin-opts"]);
+  const mode = String(opts.mode || "http");
+  if (mode !== "http" && mode !== "tls") return [];
+  const host = typeof opts.host === "string" && opts.host ? opts.host : void 0;
+  return host ? [`obfs=${mode}`, `obfs-host=${host}`] : [`obfs=${mode}`];
+}
+function appendTlsParams(parts, node, params, options = {}) {
+  const tls = node.tls === true || node.reality === true || Boolean(node["reality-opts"]);
+  if (tls) parts.push("tls=true");
+  if (options.includeSni !== false) {
+    const sni = typeof node.servername === "string" && node.servername ? node.servername : typeof node.sni === "string" && node.sni ? node.sni : void 0;
+    if (sni) parts.push(`sni=${sni}`);
+  }
+  appendAlpn(parts, node);
+  if (params.scv === true || node["skip-cert-verify"] === true) parts.push("skip-cert-verify=true");
+}
+function appendAlpn(parts, node) {
+  const alpn = normalizeAlpn2(node.alpn);
+  if (alpn.length > 0) parts.push(`alpn=${alpn.join(",")}`);
+}
+function appendWsParams(parts, node) {
+  const network = typeof node.network === "string" ? node.network.toLowerCase() : "";
+  if (network !== "ws") return;
+  const opts = asRecord2(node["ws-opts"]);
+  parts.push("ws=true");
+  const path = typeof opts.path === "string" ? opts.path : void 0;
+  if (path) parts.push(`ws-path=${path}`);
+  const headers = asRecord2(opts.headers);
+  const headerParts = [];
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === void 0 || value === null) continue;
+    headerParts.push(`${key}:${String(value)}`);
+  }
+  if (headerParts.length > 0) parts.push(`ws-headers=${headerParts.join("|")}`);
+}
+function normalizeAlpn2(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string") return value.split(/[,;]/).map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+function resolveSnellVersion(value) {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 6) return parsed;
+  return 4;
+}
+function parseBandwidthMbps(value) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.round(value);
+  if (typeof value !== "string") return void 0;
+  const match2 = value.trim().match(/^([\d.]+)\s*([a-zA-Z/]*)$/);
+  if (!match2) return void 0;
+  const amount = Number(match2[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return void 0;
+  const unit = match2[2].toLowerCase();
+  if (unit.startsWith("k")) return Math.max(1, Math.round(amount / 1024));
+  if (unit.startsWith("g")) return Math.round(amount * 1024);
+  return Math.round(amount);
+}
+function escapeSurgeName(name) {
+  const sanitized = sanitizeSurgeValue(name);
+  return sanitized || "node";
+}
+function normalizeLogLevel(value) {
+  if (typeof value !== "string") return null;
+  switch (value.toLowerCase()) {
+    case "silent":
+      return "notify";
+    case "error":
+      return "error";
+    case "warning":
+      return "warning";
+    case "info":
+      return "notify";
+    case "debug":
+      return "verbose";
+    default:
+      return null;
+  }
+}
+function asRecord2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function joinProxy(head, params, extras = []) {
+  const tokens = [];
+  const seen = /* @__PURE__ */ new Map();
+  for (const raw2 of [...params, ...extras]) {
+    const token = String(raw2 ?? "").trim();
+    if (!token) continue;
+    if (token.startsWith(POSITIONAL_PREFIX)) {
+      const sanitized = sanitizeSurgeValue(token.slice(POSITIONAL_PREFIX.length));
+      if (sanitized) tokens.push(sanitized);
+      continue;
+    }
+    const eq = token.indexOf("=");
+    if (eq === -1) {
+      const sanitized = sanitizeSurgeValue(token);
+      if (sanitized) tokens.push(sanitized);
+      continue;
+    }
+    const key = token.slice(0, eq).trim().toLowerCase();
+    const value = sanitizeSurgeValue(token.slice(eq + 1));
+    const normalized = `${key}=${value}`;
+    const existing = seen.get(key);
+    if (existing !== void 0) {
+      tokens[existing] = normalized;
+      continue;
+    }
+    seen.set(key, tokens.length);
+    tokens.push(normalized);
+  }
+  return [sanitizeHead(head), ...tokens].join(", ");
+}
+function sanitizeSurgeValue(value) {
+  return String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/[,="]+/g, "_").replace(/_{2,}/g, "_").trim();
+}
+function sanitizeHead(head) {
+  const eq = head.indexOf("=");
+  if (eq === -1) return head;
+  const name = head.slice(0, eq);
+  const rest = head.slice(eq + 1);
+  const parts = rest.split(",");
+  const type = (parts[0] ?? "").trim();
+  const host = sanitizeSurgeValue(parts[1] ?? "");
+  const port = (parts[2] ?? "").trim();
+  return `${name.trim()} = ${type}, ${host}, ${port}`;
+}
+function collectRuleTargets2(sourceConfig, iniConfig, params, ruleContents, nodeNameMap) {
+  const rules = collectFinalRules(sourceConfig, iniConfig, params, ruleContents, { finalType: "FINAL" });
+  const targets = [];
+  for (const rule of rules) {
+    if (!rule || rule.startsWith("#")) continue;
+    const parsed = parseSurgeRule(rule);
+    if (!parsed) continue;
+    targets.push(nodeNameMap.get(parsed.target) || parsed.target);
+    if (parsed.type === "MATCH" || parsed.type === "FINAL") break;
+  }
+  return targets;
+}
+function readAlterId2(node) {
+  const value = node.alterId ?? node.alterid ?? node["alter-id"];
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+}
+var POSITIONAL_PREFIX, BUILTIN_POLICIES, SURGE_TYPE_MAP;
 var init_surge = __esm({
   "src/generators/surge.ts"() {
     "use strict";
     init_ini_parser();
     init_node_utils();
-    init_rule_pruner();
+    init_rule_collector();
+    POSITIONAL_PREFIX = "positional:";
+    BUILTIN_POLICIES = /* @__PURE__ */ new Set(["DIRECT", "REJECT", "REJECT-TLS", "REJECT-DROP", "REJECT-NO-DROP"]);
+    SURGE_TYPE_MAP = {
+      ss: "ss",
+      vmess: "vmess",
+      trojan: "trojan",
+      tuic: "tuic",
+      hysteria2: "hysteria2",
+      snell: "snell",
+      anytls: "anytls",
+      http: "http",
+      https: "https",
+      socks5: "socks5",
+      ssh: "ssh"
+    };
   }
 });
 
@@ -5137,6 +6360,7 @@ __export(worker_exports, {
   default: () => worker_default,
   parseVergeTagFromLocation: () => parseVergeTagFromLocation
 });
+import { getCookie } from "hono/cookie";
 function parseQueryParams(c) {
   const q = c.req.query();
   return {
@@ -5156,7 +6380,10 @@ function parseQueryParams(c) {
     expand: parseBool(q.expand) ?? DEFAULT_PARAMS.expand,
     tls13: parseBool(q.tls13) ?? DEFAULT_PARAMS.tls13,
     dedup: parseBool(q.dedup) ?? DEFAULT_PARAMS.dedup,
-    ua: q.ua || void 0
+    ua: q.ua || void 0,
+    geo_rules: q.geo_rules === "skip" ? "skip" : q.geo_rules === "remote" ? "remote" : void 0,
+    tun: parseBool(q.tun),
+    tun_mtu: parsePositiveInt(q.tun_mtu)
   };
 }
 function getSourceUrls(c) {
@@ -5384,12 +6611,17 @@ function utf8ToBase64(str) {
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
+function parsePositiveInt(value) {
+  if (value === void 0 || value === null || value.trim() === "") return void 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return void 0;
+  return Math.floor(parsed);
+}
 var app, MAX_SOURCE_URLS, MAX_RULESET_URLS, MAX_URL_LENGTH, MAX_PARAM_LENGTH, MAX_SUBSCRIPTION_BYTES, MAX_CONFIG_BYTES, MAX_RULESET_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, FALLBACK_UA, VERGE_LATEST_RELEASE_URL, VERGE_VERSION_CACHE_TTL_MS, VERGE_VERSION_FAILURE_TTL_MS, VERGE_VERSION_TIMEOUT_MS, vergeVersionCache, vergeVersionInFlight, worker_default;
 var init_worker = __esm({
   "src/worker.ts"() {
     "use strict";
     init_dist();
-    init_cookie2();
     init_yaml_parser();
     init_ini_parser();
     init_clash();
@@ -5449,7 +6681,11 @@ var init_worker = __esm({
           }
           sourceConfig = mergeConfigs(results);
         } catch (err) {
-          console.error("\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25:", err.message);
+          const message = err.message;
+          console.error("\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25:", message);
+          if (/未找到有效代理节点|不是有效的 YAML|必须是 YAML 对象|rules 字段格式无效|订阅配置过大/.test(message)) {
+            return errorResponse(c, `\u9519\u8BEF\uFF1A${message}`, 400);
+          }
           return errorResponse(c, "\u9519\u8BEF\uFF1A\u4E0B\u8F7D\u6216\u89E3\u6790\u8BA2\u9605\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u94FE\u63A5\u6216\u7A0D\u540E\u91CD\u8BD5", 502);
         }
         if (!sourceConfig.proxies || sourceConfig.proxies.length === 0) {

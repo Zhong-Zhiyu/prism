@@ -6,13 +6,14 @@ Công cụ chuyển đổi đăng ký proxy đa định dạng, có thể triể
 
 ## Định dạng được hỗ trợ
 
-| Định dạng | Nguồn | Đầu ra |
-|------|:---:|:---:|
-| Clash / Mihomo (YAML) | ✅ | ✅ |
-| sing-box (JSON) | ⚠️ | ⚠️ |
-| Surge (INI) | ⚠️ | ⚠️ |
+| Định dạng | Làm nguồn | Làm đầu ra | Kiểm chứng bằng |
+|-----------|:---:|:---:|------|
+| Clash / Mihomo (YAML) | ✅ | ✅ | Clash Verge Rev |
+| sing-box (JSON) | ❌ | ⚠️ | Android ✅ / iOS ❌ |
+| Surge (INI) | ❌ | ⚠️ | Surfboard |
 
-> ⚠️ Chức năng nhập và xuất đối với sing-box và Surge **chưa được kiểm chứng** và có thể gặp vấn đề tương thích.
+> Nguồn đăng ký phải ở định dạng Clash / Mihomo YAML. sing-box JSON và Surge INI chỉ dùng làm đầu ra.<br>
+> **Lưu ý:** Đầu ra sing-box đã được kiểm chứng trên Android nhưng không khởi động được dịch vụ VPN trên iOS. Đầu ra Surge được kiểm chứng bằng Surfboard. Xem [hướng dẫn kiểm chứng và bảo trì](verification-guide.md).
 
 ## Triển khai nhanh
 
@@ -52,6 +53,24 @@ npm run build        # Đóng gói cho Cloudflare Workers
 npm run build:vercel # Build lại api/index.js cho Vercel
 ```
 
+## Kiểm thử
+
+```bash
+npm test          # 139 bài kiểm thử đơn vị / tích hợp (không cần phụ thuộc ngoài)
+npm run check     # kiểm thử + kiểm tra kiểu + cả hai bản dựng
+```
+
+Đầu ra cũng được kiểm chứng bằng nhân `mihomo` và `sing-box` thật
+(cần cả hai tệp nhị phân; cách lấy xem trong hướng dẫn kiểm chứng):
+
+```bash
+MIHOMO_BIN=~/tools/bin/mihomo SINGBOX_BIN=~/tools/bin/sing-box npm run verify:kernel
+```
+
+Nếu thiếu nhân, kết quả được đánh dấu SKIP chứ không phải thất bại, nên an toàn cho CI.
+
+**[Hướng dẫn kiểm chứng và bảo trì](verification-guide.md)** trình bày cách kiểm chứng bằng nhân, kiểm chứng thực tế với gói đăng ký, dựng phòng thí nghiệm cục bộ, và các kiểm tra cần chạy sau mỗi loại thay đổi.
+
 ## Cấu trúc dự án
 
 ```
@@ -67,6 +86,11 @@ prism/
 │   └── index.js           # Hàm Vercel đã build sẵn
 ├── scripts/
 │   └── dev-vercel.js      # Máy chủ phát triển Vercel cục bộ
+├── test/                  # Kiểm thử đơn vị / tích hợp / fuzz / bằng nhân
+│   └── lab/               # Phòng thí nghiệm ngoại tuyến (fixture + máy chủ cục bộ)
+├── docs/
+│   └── verification-guide.md  # Hướng dẫn kiểm chứng và bảo trì
+├── fonts/                 # Phông chữ tự lưu trữ
 ├── public/                # Thư mục tĩnh Vercel
 ├── vercel.json            # Cấu hình định tuyến Vercel
 ├── wrangler.toml          # Cấu hình Cloudflare Workers

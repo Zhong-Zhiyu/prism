@@ -13,3 +13,19 @@ dist/
 
 # 测试临时输出
 .tmp-tests/
+# 离线测试台的构建产物与输出（源码与夹具需要入库）
+test/lab/lab-worker.mjs
+test/lab/out/
+
+# 编辑器与 OS 垃圾文件
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python 工具脚本缓存
+__pycache__/
+*.pyc
+
+# 日志
+*.log
